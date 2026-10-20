@@ -57,7 +57,8 @@ Each run is traced and scored by an LLM judge against a golden dataset built fro
 
 ## Phase 0 reference: mock services
 
-One FastAPI app (`python -m release_copilot.mocks`, port 9100). Each service lives under its own prefix
+Lives in its own repo, [`../release-copilot-mocks`](../release-copilot-mocks), which is a dev-only dependency of this repo.
+One FastAPI app (`python -m release_copilot_mocks`, port 9100). Each service lives under its own prefix
 and mirrors the real paths, so a real client only needs its base URL changed.
 
 | Service | Base URL | Auth |

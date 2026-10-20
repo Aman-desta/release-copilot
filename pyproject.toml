@@ -5,11 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "release-copilot"
 version = "0.1.0"
-description = "Multi-agent LangGraph release automation over Jira, GitHub, Azure, SonarQube and ServiceNow (mocked)."
+description = "Multi-agent LangGraph release automation over Jira, GitHub, Azure, SonarQube and ServiceNow."
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.115",
-    "uvicorn>=0.30",
     "httpx>=0.28",
     "pydantic>=2.6",
     "pydantic-settings>=2.2",
@@ -20,7 +18,11 @@ dependencies = [
 where = ["src"]
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "httpx2"]
+# The mocks are a test dependency only: tests run them in-process through httpx.ASGITransport.
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "release-copilot-mocks"]
+
+[tool.uv.sources]
+release-copilot-mocks = { path = "../release-copilot-mocks", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

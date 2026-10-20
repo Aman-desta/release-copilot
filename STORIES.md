@@ -39,13 +39,14 @@ A4, A5, P1, A6, A7, A8 → P2, P3 → G1, G2 → O2, O3, O4 → M1, M2 → S1, S
 
 ### F1 [P0, M] Mock enterprise services — ✅ Done
 Jira, GitHub, Azure (Entra + ARM + Monitor), SonarQube, ServiceNow and Teams/Slack mocks, shaped like the real
-APIs, with scenarios, fault injection, a request log and an approval callback. See `README.md`.
+APIs, with scenarios, fault injection, a request log and an approval callback. They live in the separate repo
+`../release-copilot-mocks`; this repo uses them as an editable dev dependency (the `mocks_http` fixture, in-process).
 
 ### F2 [P0, S] Local infrastructure: Postgres + pgvector via Docker Compose
 **As** a developer **I want** one command to start the stateful infrastructure **so that** agents can persist
 state and memory locally the same way they will in production.
 - `compose.yaml` with `postgres` (`pgvector/pgvector:pg17`, named volume, healthcheck, init script that runs
-  `CREATE EXTENSION vector`) and the `mocks` service (built from a `Dockerfile`, healthcheck on `/`).
+  `CREATE EXTENSION vector`) and the `mocks` service (built from a `Dockerfile` added to `../release-copilot-mocks`, healthcheck on `/`).
 - Separate roles: an `app` role for the application, with no superuser rights. Credentials come only from env (`.env.example` updated).
 - Central settings module `release_copilot/config.py` (pydantic-settings, prefix `RELEASE_COPILOT_`), with
   `database_url` and the mock base URLs and credentials. Secrets are `SecretStr` and never logged.
@@ -74,7 +75,7 @@ timeouts and costs are configured instead of hard-coded.
 - The judge role refuses to use the same model as the writer unless explicitly overridden (a config validation error).
 
 ### F4 [P1, S] Code quality gates
-- `ruff` (lint and format) and `mypy --strict` on `src/release_copilot` (mocks excluded), pre-commit hooks, a GitHub Actions workflow running lint, types and tests on PRs.
+- `ruff` (lint and format) and `mypy --strict` on `src/release_copilot`, pre-commit hooks, a GitHub Actions workflow running lint, types and tests on PRs.
 
 **Acceptance:** CI is green on main; a PR with a type error fails.
 

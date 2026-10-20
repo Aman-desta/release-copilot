@@ -63,3 +63,7 @@ logs/
 *.tar
 *.tar.gz
 *.pkg
+
+# remove STORIES.MD and PLAN.md from the repository
+STORIES.MD
+PLAN.md

@@ -2,10 +2,12 @@
 
 Instructions for AI coding agents working in this repository.
 
-- Learning project; the phases are in `PLAN.md`. Work only on the phase you are asked to.
-- `src/release_copilot/mocks/`: mock enterprise services (Phase 0). Routers mirror the real vendor paths and
-  JSON shapes; keep them that way, so real clients only need a different base URL. Scenario data lives in
-  `mocks/scenarios/` (`base.py` world + `variants.py` edits + `expected` labels).
+- Multi-agent LangGraph release automation (the agents repo). The roadmap is in `PLAN.md`, the work is in
+  `STORIES.md`; work only on the story you are assigned, and update only its status marker.
+- The enterprise systems are mocked in the sibling repo `../release-copilot-mocks` (an editable **dev**
+  dependency). Tests use them in-process through the `mocks_http` / `mocks_app` fixtures in `tests/conftest.py`;
+  locally you can run them with `uv run --directory ../release-copilot-mocks python -m release_copilot_mocks`.
+  Application code must never import `release_copilot_mocks`; it only knows base URLs from config.
 - Agents must never call `/_admin` as a tool; it is for tests and evals only.
 - `uv sync` then `uv run pytest`; tests must pass and must not call real LLMs or external services.
 - Never run destructive git commands (reset --hard, push --force, branch -D) without asking.
