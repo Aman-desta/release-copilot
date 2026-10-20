@@ -1,0 +1,45 @@
+# Local infrastructure for Release Copilot (story F2).
+#   make up        start Postgres (+pgvector) and the mock enterprise services
+#   make migrate   apply Alembic migrations as the app role
+# Values come from .env (see .env.example). Init scripts run only when the volume is empty.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set POSTGRES_SUPERUSER_PASSWORD in .env}
+      POSTGRES_DB: ${RELEASE_COPILOT_DB_NAME:-release_copilot}
+      # Read by docker/postgres/initdb.d/01-app-role.sh to create the least-privilege runtime role.
+      APP_DB_USER: ${RELEASE_COPILOT_DB_APP_USER:-copilot_app}
+      APP_DB_PASSWORD: ${RELEASE_COPILOT_DB_APP_PASSWORD:?set RELEASE_COPILOT_DB_APP_PASSWORD in .env}
+      APP_DB_SCHEMA: ${RELEASE_COPILOT_DB_SCHEMA:-copilot}
+    ports:
+      - "${RELEASE_COPILOT_DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/initdb.d:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${RELEASE_COPILOT_DB_NAME:-release_copilot}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  mocks:
+    build:
+      context: ../release-copilot-mocks
+    environment:
+      RELEASE_COPILOT_MOCK_HOST: 0.0.0.0
+      RELEASE_COPILOT_MOCK_DEFAULT_SCENARIO: ${RELEASE_COPILOT_MOCK_DEFAULT_SCENARIO:-clean}
+    ports:
+      - "${RELEASE_COPILOT_MOCKS_PORT:-9100}:9100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9100/')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  pgdata:
