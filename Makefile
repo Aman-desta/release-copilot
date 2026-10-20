@@ -2,8 +2,14 @@
 
 up:            ## start Postgres + mocks and wait until healthy
 	docker compose up -d --build
-	@until [ "$$(docker inspect -f '{{.State.Health.Status}}' $$(docker compose ps -q postgres))" = healthy ]; do sleep 1; done
-	@until [ "$$(docker inspect -f '{{.State.Health.Status}}' $$(docker compose ps -q mocks))" = healthy ]; do sleep 1; done
+	@# Wait until every container in the project is healthy. (Older Compose versions ignore the service
+	@# argument to "ps -q", so check all containers instead of one per service.) Gives up after 120s.
+	@for i in $$(seq 120); do \
+	  states="$$(docker inspect -f '{{.State.Health.Status}}' $$(docker compose ps -q) | sort -u)"; \
+	  [ "$$states" = healthy ] && break; \
+	  [ $$i = 120 ] && { echo "containers not healthy: $$states"; docker compose ps; exit 1; }; \
+	  sleep 1; \
+	done
 	@docker compose ps
 
 down:          ## stop containers (data volume is kept)

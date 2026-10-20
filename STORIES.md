@@ -16,8 +16,8 @@ Each story's status goes at the end of its `###` heading line: *(none)* = open �
 
 | Status | Stories |
 |---|---|
-| Done | F1 |
-| Next up | F2 → F3 → T1 |
+| Done | F1, F2 |
+| Next up | F3 → T1 |
 
 **Suggested order:** F2, F3, T1, T2, T3, T4, T5 → A1, A2, A3 (first end-to-end run) → O1 (trace everything from here on) →
 A4, A5, P1, A6, A7, A8 → P2, P3 → G1, G2 → O2, O3, O4 → M1, M2 → S1, S2, S3 → X1, X2.
@@ -42,7 +42,7 @@ Jira, GitHub, Azure (Entra + ARM + Monitor), SonarQube, ServiceNow and Teams/Sla
 APIs, with scenarios, fault injection, a request log and an approval callback. They live in the separate repo
 `../release-copilot-mocks`; this repo uses them as an editable dev dependency (the `mocks_http` fixture, in-process).
 
-### F2 [P0, S] Local infrastructure: Postgres + pgvector via Docker Compose
+### F2 [P0, S] Local infrastructure: Postgres + pgvector via Docker Compose — ✅ Done
 **As** a developer **I want** one command to start the stateful infrastructure **so that** agents can persist
 state and memory locally the same way they will in production.
 - `compose.yaml` with `postgres` (`pgvector/pgvector:pg17`, named volume, healthcheck, init script that runs
