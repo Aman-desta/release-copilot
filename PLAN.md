@@ -10,6 +10,8 @@ A learning project for AI-engineer interviews. It implements this resume bullet 
 It also covers the other agent skills on the resume (MCP, structured outputs, memory, guardrails, RAG,
 OpenTelemetry, Langfuse/Phoenix), plus a few tools that are in high demand but missing from the resume.
 
+**Stories:** the work is broken into production-grade stories in [STORIES.md](STORIES.md), picked one at a time. The phases below are the roadmap.
+
 **How we work:** Claude built Phase 0. From Phase 1 on we use coach mode: concept, then spec, then code, then
 review. Claude writes the scaffolding and the boring parts; the user writes the core agent logic.
 
