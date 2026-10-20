@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Environment variables
+.env
+*.env
+
+# macOS
+.DS_Store
+
+# IDE / editor
+# Share run/debug configs; keep personal editor state local.
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Chroma DB local files
+data/chroma_db/
+
+# Temporary legacy files
+scratch/legacy/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Byte-compiled / optimized / DLL files
+*.pyc
+*.pyo
+*.pyd
+
+# Coverage reports
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Build directories
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+pip
+# Local runtime data and logs
+data/
+logs/
+
+# Local archives and installers
+*.tar
+*.tar.gz
+*.pkg
