@@ -66,12 +66,68 @@ class NotifySettings(_Section):
     teams_webhook_url: SecretStr | None = None
     slack_webhook_url: SecretStr | None = None
 
+class RoleModel(_Section):
+    model: str
+    fallback: str | None = None
+    temperature: float | None = None  # None = provider default (for reasoning models, usually 0)
+
+
+class LLMSettings(_Section):
+    provider: Literal["openai", "azure_openai", "litellm", "fake"] = "openai"
+
+    openai_api_key: SecretStr | None = None
+
+    azure_endpoint: AnyHttpUrl | None = None
+    azure_api_key: SecretStr | None = None
+    azure_api_version: str = "2024-10-21"
+
+    litellm_base_url: AnyHttpUrl | None = None
+    litellm_api_key: SecretStr | None = None
+
+    timeout_seconds: float = 30.0
+    max_retries: int = 3
+
+    supervisor: RoleModel = Field(default_factory=lambda: RoleModel(model="gpt-4.1-mini", temperature=0.0))
+    worker: RoleModel = Field(default_factory=lambda: RoleModel(model="gpt-4.1-mini", temperature=0.0))
+    writer: RoleModel = Field(
+        default_factory=lambda: RoleModel(model="gpt-4.1", fallback="gpt-4.1-mini", temperature=0.0)
+    )
+    judge: RoleModel = Field(default_factory=lambda: RoleModel(model="gpt-4.1-nano"))
+    allow_judge_same_as_writer: bool = False
+
+    embedding_model: str = "text-embedding-3-large"
+    embedding_dimensions: int = 1536
+
+    @model_validator(mode="after")
+    def _provider_configuration(self) -> "LLMSettings":
+        missing: list[str] = []
+        if self.provider == "openai":
+            if self.openai_api_key is None or not self.openai_api_key.get_secret_value():
+                missing.append("openai_api_key")
+        elif self.provider == "azure_openai":
+            if self.azure_endpoint is None:
+                missing.append("azure_endpoint")
+            if self.azure_api_key is None or not self.azure_api_key.get_secret_value():
+                missing.append("azure_api_key")
+        elif self.provider == "litellm":
+            if self.litellm_base_url is None:
+                missing.append("litellm_base_url")
+            if self.litellm_api_key is None or not self.litellm_api_key.get_secret_value():
+                missing.append("litellm_api_key")
+
+        if missing:
+            raise ValueError(f"{self.provider} provider requires: {', '.join(missing)}")
+        if not self.allow_judge_same_as_writer and self.judge.model == self.writer.model:
+            raise ValueError("judge model must differ from writer model unless allow_judge_same_as_writer is true")
+        return self
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="RELEASE_COPILOT_",
         env_nested_delimiter="__",
         env_file=".env",
+        env_ignore_empty=True,
         extra="ignore",
         hide_input_in_errors=True,
         frozen=True,
@@ -86,6 +142,7 @@ class Settings(BaseSettings):
     sonar: SonarSettings
     servicenow: ServiceNowSettings
     notify: NotifySettings = Field(default_factory=NotifySettings)
+    llm: LLMSettings = Field(default_factory=LLMSettings)
 
     @field_validator("database_url")
     @classmethod

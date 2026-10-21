@@ -59,7 +59,7 @@ state and memory locally the same way they will in production.
 - The app connects as the `app` role, not as `postgres`.
 - Removing the containers and starting again keeps the data (named volume).
 
-### F3 [P0, M] Model gateway: per-role model factory
+### F3 [P0, M] Model gateway: per-role model factory — 🔵 In progress
 **As** the platform **I need** one place that creates chat and embedding models **so that** providers, models,
 timeouts and costs are configured instead of hard-coded.
 - `release_copilot/llm.py`: `get_chat_model(role)` for roles `supervisor | worker | writer | judge`, and `get_embeddings()`.
