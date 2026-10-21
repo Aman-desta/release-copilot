@@ -74,7 +74,7 @@ def test_openai_models_per_role(app_env):
     s = load().llm
     assert isinstance(model, ChatOpenAI)
     assert model.model_name == s.writer.model
-    assert model.request_timeout == s.timeout_seconds and model.max_retries == s.max_retries
+    assert model.request_timeout == s.writer.timeout_seconds and model.max_retries == s.max_retries
     assert model.metadata["copilot_role"] == "writer"  # UsageTracker and traces attribute calls by this
     assert get_chat_model("writer") is get_chat_model("writer")  # cached per role
 
@@ -217,3 +217,26 @@ def test_unknown_model_cost_is_unknown_not_zero():
 def test_dated_model_names_match_pricing():
     assert price_for("gpt-4.1-mini-2025-04-14") == price_for("gpt-4.1-mini")
     assert price_for("gpt-4.1-2025-04-14") == price_for("gpt-4.1") != price_for("gpt-4.1-mini")
+
+
+# ------------------------------------------------------------------------------- latency budget (review)
+
+
+def test_primary_retries_less_when_a_fallback_exists(app_env):
+    s = load().llm
+    resilient = get_resilient_model("writer")  # writer has a fallback by default
+    assert resilient.runnable.max_retries == s.retries_before_fallback < s.max_retries
+    assert resilient.fallbacks[0].max_retries == s.max_retries
+    assert get_chat_model("writer").max_retries == s.max_retries  # the plain primary keeps the full budget
+
+
+def test_per_role_timeout_overrides_global(app_env):
+    s = load().llm
+    assert get_chat_model("writer").request_timeout == s.writer.timeout_seconds > s.timeout_seconds
+    assert get_chat_model("worker").request_timeout == s.timeout_seconds
+
+
+def test_default_judge_is_not_weaker_than_the_writer(app_env):
+    s = load().llm
+    assert s.judge.model not in {"gpt-4.1-nano", "gpt-4o-mini"}
+    assert s.judge.temperature is None  # reasoning model

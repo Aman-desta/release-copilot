@@ -70,6 +70,7 @@ class RoleModel(_Section):
     model: str
     fallback: str | None = None
     temperature: float | None = None  # None = provider default (for reasoning models, usually 0)
+    timeout_seconds: float | None = None  # None = LLMSettings.timeout_seconds
 
 
 class LLMSettings(_Section):
@@ -84,15 +85,23 @@ class LLMSettings(_Section):
     litellm_base_url: AnyHttpUrl | None = None
     litellm_api_key: SecretStr | None = None
 
+    # Per-request timeout and SDK retries (exponential backoff on connection errors, 408/409/429/5xx).
+    # Worst-case latency of one call is about (retries + 1) x timeout + backoff, so keep these tight.
     timeout_seconds: float = 30.0
     max_retries: int = 3
+    # When a role has a fallback, its primary retries only this often before the fallback takes over;
+    # otherwise an outage waits through every primary retry first. The fallback keeps max_retries.
+    retries_before_fallback: int = Field(default=1, ge=0)
 
     supervisor: RoleModel = Field(default_factory=lambda: RoleModel(model="gpt-4.1-mini", temperature=0.0))
     worker: RoleModel = Field(default_factory=lambda: RoleModel(model="gpt-4.1-mini", temperature=0.0))
     writer: RoleModel = Field(
-        default_factory=lambda: RoleModel(model="gpt-4.1", fallback="gpt-4.1-mini", temperature=0.0)
+        # Long release documents can legitimately take longer than a tool-calling turn.
+        default_factory=lambda: RoleModel(model="gpt-4.1", fallback="gpt-4.1-mini", temperature=0.0, timeout_seconds=120.0)
     )
-    judge: RoleModel = Field(default_factory=lambda: RoleModel(model="gpt-4.1-nano"))
+    # The judge must be at least as capable as the writer it grades; a reasoning model, so no temperature.
+    # Prefer a different model family than the writer once a second provider is configured.
+    judge: RoleModel = Field(default_factory=lambda: RoleModel(model="o4-mini", timeout_seconds=120.0))
     allow_judge_same_as_writer: bool = False
 
     embedding_model: str = "text-embedding-3-large"

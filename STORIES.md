@@ -16,8 +16,8 @@ Each story's status goes at the end of its `###` heading line: *(none)* = open �
 
 | Status | Stories |
 |---|---|
-| Done | F1, F2 |
-| Next up | F3 → T1 |
+| Done | F1, F2, F3 |
+| Next up | T1 → T2 |
 
 **Suggested order:** F2, F3, T1, T2, T3, T4, T5 → A1, A2, A3 (first end-to-end run) → O1 (trace everything from here on) →
 A4, A5, P1, A6, A7, A8 → P2, P3 → G1, G2 → O2, O3, O4 → M1, M2 → S1, S2, S3 → X1, X2.
@@ -59,7 +59,7 @@ state and memory locally the same way they will in production.
 - The app connects as the `app` role, not as `postgres`.
 - Removing the containers and starting again keeps the data (named volume).
 
-### F3 [P0, M] Model gateway: per-role model factory — 🔵 In progress
+### F3 [P0, M] Model gateway: per-role model factory — ✅ Done
 **As** the platform **I need** one place that creates chat and embedding models **so that** providers, models,
 timeouts and costs are configured instead of hard-coded.
 - `release_copilot/llm.py`: `get_chat_model(role)` for roles `supervisor | worker | writer | judge`, and `get_embeddings()`.

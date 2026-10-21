@@ -1,6 +1,11 @@
 """Model factory: one place that turns ``settings.llm`` into chat and embedding models (story F3).
 
-YOUR PART. The contract is in tests/test_llm.py.
+- ``get_chat_model(role)``: the role's primary model, cached; carries ``metadata["copilot_role"]`` for usage/traces.
+- ``get_resilient_model(role, prepare)``: primary plus the role's fallback; ``prepare`` (bind_tools,
+  with_structured_output, ...) is applied to each model *before* ``with_fallbacks``, whose result has neither.
+- ``get_embeddings()``: embeddings for memory and policy RAG.
+
+Credentials and endpoints are validated by ``LLMSettings`` at startup, so the factory does not re-check them.
 """
 
 from collections.abc import Callable
@@ -21,8 +26,9 @@ from release_copilot.llm.fake import FakeChatModel
 Role = Literal["supervisor", "worker", "writer", "judge"]
 ROLES: tuple[Role, ...] = ("supervisor", "worker", "writer", "judge")
 
+# Worth retrying on another model. Not 400/401/403/404: those are bugs or config errors a fallback would hide.
 TRANSIENT_ERRORS: tuple[type[BaseException], ...] = (
-    openai.APIConnectionError,
+    openai.APIConnectionError,  # includes APITimeoutError
     openai.APITimeoutError,
     openai.RateLimitError,
     openai.InternalServerError,
@@ -32,79 +38,63 @@ TRANSIENT_ERRORS: tuple[type[BaseException], ...] = (
 def _model_settings(role: Role) -> tuple[LLMSettings, RoleModel]:
     if role not in ROLES:
         raise ValueError(f"unknown model role: {role}")
-    settings = get_settings().llm
-    return settings, getattr(settings, role)
+    llm = get_settings().llm
+    return llm, getattr(llm, role)
 
 
-def _required_secret(value: SecretStr | None, field: str, provider: str) -> SecretStr:
-    if value is None or not value.get_secret_value():
-        raise ValueError(f"{provider} provider requires {field}")
+def _secret(value: SecretStr | None) -> SecretStr:
+    assert value is not None, "validated by LLMSettings"
     return value
 
 
-def _chat_model(role: Role, llm: LLMSettings, model: RoleModel, model_name: str | None = None) -> BaseChatModel:
-    name = model_name or model.model
-    kwargs: dict[str, Any] = {
-        "model": name,
-        "timeout": llm.timeout_seconds,
-        "max_retries": llm.max_retries,
-        "metadata": {"copilot_role": role},
-    }
-    if model.temperature is not None:
-        kwargs["temperature"] = model.temperature
-
+def _chat_model(role: Role, llm: LLMSettings, role_model: RoleModel, *, name: str, max_retries: int) -> BaseChatModel:
+    metadata = {"copilot_role": role}
     if llm.provider == "fake":
-        return FakeChatModel(model_name=name, metadata={"copilot_role": role})
-    if llm.provider == "openai":
-        return ChatOpenAI(api_key=_required_secret(llm.openai_api_key, "openai_api_key", llm.provider), **kwargs)
+        return FakeChatModel(model_name=name, metadata=metadata)
+
+    common: dict[str, Any] = {
+        "timeout": role_model.timeout_seconds or llm.timeout_seconds,
+        "max_retries": max_retries,
+        "metadata": metadata,
+    }
+    if role_model.temperature is not None:
+        common["temperature"] = role_model.temperature
+
     if llm.provider == "azure_openai":
-        if llm.azure_endpoint is None:
-            raise ValueError("azure_openai provider requires azure_endpoint")
-        azure_kwargs: dict[str, Any] = {
-            "azure_deployment": name,
-            "azure_endpoint": str(llm.azure_endpoint),
-            "api_key": _required_secret(llm.azure_api_key, "azure_api_key", llm.provider),
-            "api_version": llm.azure_api_version,
-            "timeout": llm.timeout_seconds,
-            "max_retries": llm.max_retries,
-            "metadata": {"copilot_role": role},
-        }
-        if model.temperature is not None:
-            azure_kwargs["temperature"] = model.temperature
-        return AzureChatOpenAI(**azure_kwargs)
-    if llm.provider == "litellm":
-        if llm.litellm_base_url is None:
-            raise ValueError("litellm provider requires litellm_base_url")
-        return ChatOpenAI(
-            base_url=str(llm.litellm_base_url),
-            api_key=_required_secret(llm.litellm_api_key, "litellm_api_key", llm.provider),
-            **kwargs,
+        # On Azure the configured "model" is the deployment name.
+        return AzureChatOpenAI(
+            azure_deployment=name,
+            azure_endpoint=str(llm.azure_endpoint),
+            api_key=_secret(llm.azure_api_key),
+            api_version=llm.azure_api_version,
+            **common,
         )
-    raise ValueError(f"unsupported model provider: {llm.provider}")
+    if llm.provider == "litellm":
+        return ChatOpenAI(model=name, base_url=str(llm.litellm_base_url), api_key=_secret(llm.litellm_api_key), **common)
+    return ChatOpenAI(model=name, api_key=_secret(llm.openai_api_key), **common)
 
 
 @lru_cache
 def get_chat_model(role: Role) -> BaseChatModel:
-    """The primary model for ``role``. Cached per role; must not call the network."""
-    llm, model = _model_settings(role)
-    return _chat_model(role, llm, model)
+    """The primary model for ``role``, with the full retry budget. Cached per role; never calls the network."""
+    llm, role_model = _model_settings(role)
+    return _chat_model(role, llm, role_model, name=role_model.model, max_retries=llm.max_retries)
 
 
 def get_resilient_model(role: Role, prepare: Callable[[BaseChatModel], Runnable] | None = None) -> Runnable:
-    """Primary model with the role's fallback (if configured), with ``prepare`` applied to each model first."""
-    llm, role_model = _model_settings(role)
-    primary = get_chat_model(role)
-    prepare_model = prepare or (lambda model: model)
-    prepared_primary = prepare_model(primary)
-    if not role_model.fallback:
-        return prepared_primary
+    """Primary with the role's fallback (if configured), with ``prepare`` applied to each model first.
 
-    fallback = _chat_model(role, llm, role_model, role_model.fallback)
-    prepared_fallback = prepare_model(fallback)
-    return prepared_primary.with_fallbacks(
-        [prepared_fallback],
-        exceptions_to_handle=TRANSIENT_ERRORS,
-    )
+    With a fallback, the primary retries only ``retries_before_fallback`` times, so an outage switches models in
+    seconds instead of waiting through every primary retry; the fallback keeps the full ``max_retries``.
+    """
+    llm, role_model = _model_settings(role)
+    prepare = prepare or (lambda model: model)
+    if not role_model.fallback:
+        return prepare(get_chat_model(role))
+
+    primary = _chat_model(role, llm, role_model, name=role_model.model, max_retries=llm.retries_before_fallback)
+    fallback = _chat_model(role, llm, role_model, name=role_model.fallback, max_retries=llm.max_retries)
+    return prepare(primary).with_fallbacks([prepare(fallback)], exceptions_to_handle=TRANSIENT_ERRORS)
 
 
 @lru_cache
@@ -112,32 +102,19 @@ def get_embeddings() -> Embeddings:
     llm = get_settings().llm
     if llm.provider == "fake":
         return DeterministicFakeEmbedding(size=llm.embedding_dimensions)
+    common: dict[str, Any] = {
+        "dimensions": llm.embedding_dimensions,
+        "timeout": llm.timeout_seconds,
+        "max_retries": llm.max_retries,
+    }
     if llm.provider == "azure_openai":
-        if llm.azure_endpoint is None:
-            raise ValueError("azure_openai provider requires azure_endpoint")
         return AzureOpenAIEmbeddings(
             azure_deployment=llm.embedding_model,
             azure_endpoint=str(llm.azure_endpoint),
-            api_key=_required_secret(llm.azure_api_key, "azure_api_key", llm.provider),
+            api_key=_secret(llm.azure_api_key),
             api_version=llm.azure_api_version,
-            dimensions=llm.embedding_dimensions,
-            timeout=llm.timeout_seconds,
-            max_retries=llm.max_retries,
+            **common,
         )
-
     if llm.provider == "litellm":
-        if llm.litellm_base_url is None:
-            raise ValueError("litellm provider requires litellm_base_url")
-        base_url = str(llm.litellm_base_url)
-        api_key = _required_secret(llm.litellm_api_key, "litellm_api_key", llm.provider)
-    else:
-        base_url = None
-        api_key = _required_secret(llm.openai_api_key, "openai_api_key", llm.provider)
-    return OpenAIEmbeddings(
-        model=llm.embedding_model,
-        dimensions=llm.embedding_dimensions,
-        api_key=api_key,
-        base_url=base_url,
-        timeout=llm.timeout_seconds,
-        max_retries=llm.max_retries,
-    )
+        return OpenAIEmbeddings(model=llm.embedding_model, base_url=str(llm.litellm_base_url), api_key=_secret(llm.litellm_api_key), **common)
+    return OpenAIEmbeddings(model=llm.embedding_model, api_key=_secret(llm.openai_api_key), **common)
