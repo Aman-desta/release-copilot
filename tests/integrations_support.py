@@ -40,3 +40,22 @@ class Mocks:
 
     def calls(self, path_prefix: str = "") -> list[dict]:
         return [r for r in self.state.requests if r["path"].startswith(path_prefix)]
+
+
+class RewritingTransport(httpx.AsyncBaseTransport):
+    """Wraps a transport and lets a test edit JSON responses, to simulate vendor quirks the mocks don't have."""
+
+    def __init__(self, inner: httpx.AsyncBaseTransport, rewrite) -> None:  # rewrite(request, body) -> body
+        self._inner = inner
+        self._rewrite = rewrite
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        response = await self._inner.handle_async_request(request)
+        await response.aread()
+        try:
+            body = response.json()
+        except ValueError:
+            return response
+        new = self._rewrite(request, body)
+        headers = {k: v for k, v in response.headers.items() if k.lower() not in {"content-length", "content-encoding"}}
+        return httpx.Response(response.status_code, headers=headers, json=new, request=request)

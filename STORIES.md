@@ -16,8 +16,8 @@ Each story's status goes at the end of its `###` heading line: *(none)* = open �
 
 | Status | Stories |
 |---|---|
-| Done | F1, F2, F3, T1 |
-| Next up | T2 → T3 |
+| Done | F1, F2, F3, T1, T2 |
+| Next up | T3 → T4 |
 
 **Suggested order:** F2, F3, T1, T2, T3, T4, T5 → A1, A2, A3 (first end-to-end run) → O1 (trace everything from here on) →
 A4, A5, P1, A6, A7, A8 → P2, P3 → G1, G2 → O2, O3, O4 → M1, M2 → S1, S2, S3 → X1, X2.
@@ -101,7 +101,7 @@ timeouts and costs are configured instead of hard-coded.
 - Azure token TTL of 2s → calls after expiry refresh transparently; 10 concurrent calls trigger exactly 1 token request.
 - 5 consecutive 503s open the breaker; the next call fails fast without HTTP.
 
-### T2 [P0, M] Jira and GitHub evidence clients — 🔵 In progress
+### T2 [P0, M] Jira and GitHub evidence clients — ✅ Done
 - `JiraClient`: `search(jql)` (async iterator over `nextPageToken` pages), `get_issue`, `add_comment(markdown)`
   (converts to ADF), `transition`. **ADF → Markdown converter** (paragraphs, lists, code, links, mentions; unknown nodes become plain text).
 - `GitHubClient`: `compare(base, head)`, `pulls_for_commit`, `reviews`, `check_runs`, `dependabot_alerts`,

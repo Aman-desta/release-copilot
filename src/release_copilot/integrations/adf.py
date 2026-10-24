@@ -18,7 +18,159 @@ Node = dict[str, Any]
 
 def adf_to_markdown(doc: Node | None) -> str:
     """Render an ADF document as Markdown. Never raises: unknown or malformed nodes degrade to their text."""
-    raise NotImplementedError
+    if not isinstance(doc, dict):
+        return ""
+    if doc.get("type") == "doc":
+        return "\n\n".join(part for node in _children(doc) if (part := _render_block(node)))
+    return _render_block(doc)
+
+
+def _children(node: Node) -> list[Any]:
+    content = node.get("content")
+    return content if isinstance(content, list) else []
+
+
+def _attrs(node: Node) -> dict[str, Any]:
+    attrs = node.get("attrs")
+    return attrs if isinstance(attrs, dict) else {}
+
+
+def _render_inline(nodes: list[Any]) -> str:
+    rendered: list[str] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_type = node.get("type")
+        if node_type == "text":
+            text = node.get("text")
+            if not isinstance(text, str):
+                continue
+            marks = node.get("marks")
+            valid_marks = [mark for mark in marks if isinstance(mark, dict)] if isinstance(marks, list) else []
+            link = next((mark for mark in valid_marks if mark.get("type") == "link"), None)
+            for mark in valid_marks:
+                mark_type = mark.get("type")
+                if mark_type == "strong":
+                    text = f"**{text}**"
+                elif mark_type == "em":
+                    text = f"*{text}*"
+                elif mark_type == "code":
+                    text = f"`{text}`"
+                elif mark_type == "strike":
+                    text = f"~~{text}~~"
+            if link is not None:
+                href = _attrs(link).get("href")
+                if isinstance(href, str) and href:
+                    text = f"[{text}]({href})"
+            rendered.append(text)
+        elif node_type == "hardBreak":
+            rendered.append("\n")
+        elif isinstance(node_type, str) and node_type in {"mention", "emoji", "inlineCard"}:
+            attrs = _attrs(node)
+            if node_type == "mention":
+                value = attrs.get("text") or attrs.get("displayName")
+                if isinstance(value, str):
+                    rendered.append(value if value.startswith("@") else f"@{value}")
+            elif node_type == "emoji":
+                value = attrs.get("text") or attrs.get("shortName")
+                if isinstance(value, str):
+                    rendered.append(value)
+            else:
+                value = attrs.get("url")
+                if isinstance(value, str):
+                    rendered.append(value)
+        else:
+            rendered.append(_plain_text(node))
+    return "".join(rendered)
+
+
+def _plain_text(node: Any) -> str:
+    if not isinstance(node, dict):
+        return ""
+    if node.get("type") == "text":
+        text = node.get("text")
+        return text if isinstance(text, str) else ""
+    node_type = node.get("type")
+    attrs = _attrs(node)
+    if node_type == "mention":
+        value = attrs.get("text") or attrs.get("displayName")
+        return value if isinstance(value, str) else ""
+    if node_type == "emoji":
+        value = attrs.get("text") or attrs.get("shortName")
+        return value if isinstance(value, str) else ""
+    if node_type == "inlineCard":
+        value = attrs.get("url")
+        return value if isinstance(value, str) else ""
+    if node_type == "hardBreak":
+        return "\n"
+    return "".join(_plain_text(child) for child in _children(node))
+
+
+def _render_block(node: Any, list_depth: int = 0) -> str:
+    if not isinstance(node, dict):
+        return ""
+    node_type = node.get("type")
+    children = _children(node)
+    if node_type == "paragraph":
+        return _render_inline(children)
+    if node_type == "heading":
+        level = _attrs(node).get("level", 1)
+        if isinstance(level, bool) or not isinstance(level, int):
+            level = 1
+        return f'{"#" * min(max(level, 1), 6)} {_render_inline(children)}'
+    if isinstance(node_type, str) and node_type in {"bulletList", "orderedList"}:
+        return _render_list(node, list_depth)
+    if node_type == "listItem":
+        return "\n\n".join(part for child in children if (part := _render_block(child, list_depth)))
+    if node_type == "codeBlock":
+        language = _attrs(node).get("language")
+        language = language if isinstance(language, str) else ""
+        code = "".join(_plain_text(child) for child in children)
+        return f"```{language}\n{code}\n```"
+    if node_type == "blockquote":
+        body = "\n\n".join(part for child in children if (part := _render_block(child, list_depth)))
+        if not body:
+            return ""
+        return "\n".join(f"> {line}" if line else ">" for line in body.split("\n"))
+    if node_type == "rule":
+        return "---"
+    return _plain_text(node)
+
+
+def _render_list(node: Node, depth: int) -> str:
+    ordered = node.get("type") == "orderedList"
+    order = _attrs(node).get("order", 1)
+    if isinstance(order, bool) or not isinstance(order, int):
+        order = 1
+
+    lines: list[str] = []
+    for child in _children(node):
+        if not isinstance(child, dict) or child.get("type") != "listItem":
+            continue
+        marker = f"{order}. " if ordered else "- "
+        order += 1
+        prefix = " " * (depth * 2)
+        continuation = prefix + " " * len(marker)
+        first_line = True
+        for item_child in _children(child):
+            item_type = item_child.get("type") if isinstance(item_child, dict) else None
+            if isinstance(item_type, str) and item_type in {"bulletList", "orderedList"}:
+                nested = _render_list(item_child, depth + 1)
+                if nested:
+                    lines.extend(nested.split("\n"))
+                continue
+
+            content = _render_block(item_child, depth + 1)
+            if not content:
+                continue
+            content_lines = content.split("\n")
+            if first_line:
+                lines.append(prefix + marker + content_lines[0])
+                first_line = False
+            else:
+                lines.append(continuation + content_lines[0])
+            lines.extend(continuation + line for line in content_lines[1:])
+    return "\n".join(lines)
 
 
 # ----------------------------------------------------------------------------------- Markdown -> ADF

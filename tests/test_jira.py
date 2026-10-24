@@ -86,3 +86,67 @@ async def test_prompt_injection_text_is_preserved_verbatim(mock_env):
     async with client(Mocks("prompt_injection")) as jira:
         issue = await jira.get_issue("PAY-109")
     assert "hooks.example.net" in issue.description_markdown
+
+
+# ------------------------------------------------------------------------------- completeness (review)
+
+from tests.integrations_support import RewritingTransport  # noqa: E402
+
+
+def rewritten(mocks: Mocks, rewrite):
+    return jira_client(get_settings(), transport=RewritingTransport(mocks.transport(), rewrite))
+
+
+async def test_get_issue_requests_only_mapped_fields(mock_env):
+    mocks = Mocks()
+    async with client(mocks) as jira:
+        await jira.get_issue("PAY-102")
+    assert "fields=" in mocks.calls("/jira/rest/api/3/issue/")[0]["query"]
+
+
+async def test_missing_is_last_does_not_truncate_search(mock_env):
+    def drop_is_last(request, body):
+        body.pop("isLast", None) if request.url.path.endswith("/search/jql") else None
+        return body
+
+    async with rewritten(Mocks(), drop_is_last) as jira:
+        issues = [i async for i in jira.search(FIX_VERSION, page_size=3)]
+    assert len(issues) == 8
+
+
+async def test_stuck_page_token_raises_instead_of_looping(mock_env):
+    from release_copilot.integrations.errors import IntegrationError
+
+    def stuck(request, body):
+        if request.url.path.endswith("/search/jql"):
+            body.update(isLast=False, nextPageToken="Mw==")  # a valid token ("offset 3") that never advances
+        return body
+
+    async with rewritten(Mocks(), stuck) as jira:
+        with pytest.raises(IntegrationError, match="did not advance"):
+            [i async for i in jira.search(FIX_VERSION, page_size=3)]
+
+
+async def test_truncated_embedded_comments_are_fetched(mock_env):
+    mocks = Mocks()
+    world_issue = mocks.state.world()["jira"]["issues"]["PAY-102"]
+    for n in range(1, 151):  # 151 comments in total: more than one comment page
+        world_issue["fields"]["comment"]["comments"].append(
+            {"id": str(90000 + n), "author": {"displayName": "Bot"}, "body": {"type": "doc", "content": []}, "created": "2026-10-09T10:00:00.000+0000"}
+        )
+
+    def embed_first_page_only(request, body):
+        # Real Jira embeds only the first page of comments in issue payloads, plus the real total.
+        for issue in body.get("issues", [body]):  # search pages and single issues
+            comment = (issue.get("fields") or {}).get("comment")
+            if isinstance(comment, dict) and "comments" in comment:
+                comment.update(total=len(comment["comments"]), maxResults=20, comments=comment["comments"][:20])
+        return body
+
+    async with rewritten(mocks, embed_first_page_only) as jira:
+        issue = await jira.get_issue("PAY-102")
+        from_search = [i async for i in jira.search('key = PAY-102')]
+    assert len(issue.comments) == 151 and len({c.id for c in issue.comments}) == 151
+    assert issue.comments[0].author == "Dana Reyes"  # order kept: oldest first
+    assert len(from_search[0].comments) == 151
+    assert len(mocks.calls("/jira/rest/api/3/issue/PAY-102/comment")) == 4  # 2 pages each, for get and search
