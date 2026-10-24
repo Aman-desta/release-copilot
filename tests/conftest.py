@@ -64,6 +64,23 @@ def app_env(monkeypatch, tmp_path):
 
 
 @pytest.fixture
+def mock_env(app_env):
+    """``app_env`` with the mocks' own test credentials, for clients built from settings (``integrations.clients``)."""
+    from release_copilot_mocks.settings import MockSettings
+
+    m = MockSettings()
+    for key, value in {
+        "JIRA__EMAIL": m.jira_email, "JIRA__API_TOKEN": m.jira_api_token, "GITHUB__TOKEN": m.github_token,
+        "AZURE__TENANT_ID": m.azure_tenant_id, "AZURE__CLIENT_ID": m.azure_client_id,
+        "AZURE__CLIENT_SECRET": m.azure_client_secret, "SONAR__TOKEN": m.sonar_token,
+        "SERVICENOW__USER": m.servicenow_user, "SERVICENOW__PASSWORD": m.servicenow_password,
+    }.items():
+        app_env.setenv(f"RELEASE_COPILOT_{key}", value)
+    get_settings.cache_clear()
+    return app_env
+
+
+@pytest.fixture
 def mocks_app():
     """A fresh mock app per test (default scenario ``clean``; override per request with ``X-Mock-Scenario``)."""
     return create_app("clean")
