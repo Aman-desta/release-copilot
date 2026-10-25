@@ -10,7 +10,8 @@ Callers (and agents, via the tool layer in T5) branch on the *type*, never on ve
     ├── InvalidRequestError       400 / 422: our request is wrong; never retried
     ├── RateLimitedError          429: retryable, carries retry_after
     ├── UpstreamUnavailableError  5xx, timeouts, connection failures: retryable
-    └── CircuitOpenError          the breaker is open: failed fast, no HTTP call made
+    ├── CircuitOpenError          the breaker is open: failed fast, no HTTP call made
+    └── OperationFailedError      a long-running operation (slot swap) ended Failed or Canceled
 
 Each error carries the service, method, path *template* (not the filled path: low cardinality, no IDs or PII),
 the status, and the vendor's own message extracted from its error body.
@@ -90,6 +91,10 @@ class UpstreamUnavailableError(IntegrationError):
 
 class CircuitOpenError(IntegrationError):
     pass
+
+
+class OperationFailedError(IntegrationError):
+    """A long-running operation (e.g. a slot swap) finished as Failed or Canceled. Not retryable as-is."""
 
 
 _BY_STATUS: dict[int, type[IntegrationError]] = {

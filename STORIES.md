@@ -112,7 +112,7 @@ timeouts and costs are configured instead of hard-coded.
 **Acceptance:** tests against the mocks cover pagination across pages, ADF round-trips for the seeded
 descriptions, and finding the `coverage_drop` hotfix commit as having no PR.
 
-### T3 [P0, S] Azure App Service and Monitor client
+### T3 [P0, S] Azure App Service and Monitor client — 🔵 In progress
 - `AzureAppServiceClient`: `get_site`, `list_slots`, `deployments(slot)`, `metrics(slot, names, timespan, interval)` →
   a typed `MetricSeries`, `swap(source, target)` that **polls `Azure-AsyncOperation` until it finishes**, with a timeout.
 - `api-version` is pinned in one constant; the resource ID is built from config (subscription, RG, site).

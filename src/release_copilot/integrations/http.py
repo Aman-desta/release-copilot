@@ -64,6 +64,10 @@ class ServiceClient:
             follow_redirects=False,  # a redirect would resend credentials elsewhere
         )
 
+    @property
+    def base_url(self) -> httpx.URL:
+        return self._http.base_url
+
     async def __aenter__(self) -> "ServiceClient":
         return self
 
@@ -85,11 +89,17 @@ class ServiceClient:
         headers: Mapping[str, str] | None = None,
         idempotent: bool | None = None,
         ok: Iterable[int] = (200, 201, 202, 204),
+        log_path: str | None = None,
     ) -> httpx.Response:
-        """Send ``method path`` (``path`` may hold ``{placeholders}`` filled from ``path_params``)."""
+        """Send ``method path`` (``path`` may hold ``{placeholders}`` filled from ``path_params``).
+
+        ``log_path`` replaces ``path`` in logs and errors, for URLs that are not templates (e.g. an absolute
+        long-running-operation URL that embeds subscription and operation ids).
+        """
         method = method.upper()
         # Each parameter is percent-encoded as ONE path segment: "a/b" or "../x" can't change the route.
-        url = path.format(**{k: quote(str(v), safe="") for k, v in (path_params or {}).items()})
+        url = path.format(**{k: quote(str(v), safe="") for k, v in (path_params or {}).items()}) if path_params else path
+        path = log_path or path
         expected = set(ok)
         started = self._clock()
         attempt = 0
