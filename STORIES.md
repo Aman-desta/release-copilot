@@ -16,8 +16,8 @@ Each story's status goes at the end of its `###` heading line: *(none)* = open �
 
 | Status | Stories |
 |---|---|
-| Done | F1, F2, F3, T1, T2 |
-| Next up | T3 → T4 |
+| Done | F1, F2, F3, T1, T2, T3 |
+| Next up | T4 → T5 |
 
 **Suggested order:** F2, F3, T1, T2, T3, T4, T5 → A1, A2, A3 (first end-to-end run) → O1 (trace everything from here on) →
 A4, A5, P1, A6, A7, A8 → P2, P3 → G1, G2 → O2, O3, O4 → M1, M2 → S1, S2, S3 → X1, X2.
@@ -112,7 +112,7 @@ timeouts and costs are configured instead of hard-coded.
 **Acceptance:** tests against the mocks cover pagination across pages, ADF round-trips for the seeded
 descriptions, and finding the `coverage_drop` hotfix commit as having no PR.
 
-### T3 [P0, S] Azure App Service and Monitor client — 🔵 In progress
+### T3 [P0, S] Azure App Service and Monitor client — ✅ Done
 - `AzureAppServiceClient`: `get_site`, `list_slots`, `deployments(slot)`, `metrics(slot, names, timespan, interval)` →
   a typed `MetricSeries`, `swap(source, target)` that **polls `Azure-AsyncOperation` until it finishes**, with a timeout.
 - `api-version` is pinned in one constant; the resource ID is built from config (subscription, RG, site).

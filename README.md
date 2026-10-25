@@ -6,6 +6,7 @@ ServiceNow change request, route approval by risk, and plan the rollback. Runs a
 LLM judge.
 
 This is a learning project: the roadmap is in [PLAN.md](PLAN.md) and the work is in [STORIES.md](STORIES.md).
+Design notes: [Foundations and integration layer](docs/design-foundations-and-integrations.md).
 
 ## Repositories
 

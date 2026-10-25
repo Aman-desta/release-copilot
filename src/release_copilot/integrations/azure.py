@@ -3,7 +3,8 @@
 Every call goes through path *templates* (subscription, resource group and site are path params), so logs and
 errors never contain subscription ids.
 
-YOUR PART: ``metrics`` and ``swap``. Contract in tests/test_azure.py.
+Swaps are written as "ensure the target runs release X" (idempotent), and every ambiguous exit after the swap
+request is sent is reported as "outcome unknown", never as an ordinary failure a caller might retry blindly.
 """
 
 import asyncio
@@ -197,111 +198,96 @@ class AzureAppServiceClient:
             )
 
         swap_path, path_params = self._resource(source)
-        response = await self._http.request(
-            "POST",
-            swap_path + "/slotsswap",
-            path_params=path_params,
-            params={"api-version": WEB_API_VERSION},
-            json={"targetSlot": target, "preserveVnet": True},
-            idempotent=False,
-            ok=(202,),
-        )
-        operation_header = response.headers.get("Azure-AsyncOperation")
-        if not operation_header:
-            raise IntegrationError(
-                "Azure swap response did not include an Azure-AsyncOperation URL.",
-                service=self._http.service,
-                method="POST",
-                path=swap_path + "/slotsswap",
-                status=response.status_code,
-            )
-
+        post_path = swap_path + "/slotsswap"
         try:
-            operation_url = self._http.base_url.join(operation_header)
-        except httpx.InvalidURL as exc:
-            raise IntegrationError(
-                "Azure returned an invalid Azure-AsyncOperation URL.",
-                service=self._http.service,
-                method="POST",
-                path=swap_path + "/slotsswap",
-                status=response.status_code,
-            ) from exc
-        base_url = self._http.base_url
-        if (operation_url.scheme, operation_url.host, operation_url.port) != (base_url.scheme, base_url.host, base_url.port):
-            raise IntegrationError(
-                f"Azure-AsyncOperation URL must use the ARM host; received {operation_url.host!r}.",
-                service=self._http.service,
-                method="POST",
-                path=swap_path + "/slotsswap",
-                status=response.status_code,
+            response = await self._http.request(
+                "POST",
+                post_path,
+                path_params=path_params,
+                params={"api-version": WEB_API_VERSION},
+                json={"targetSlot": target, "preserveVnet": True},
+                idempotent=False,
+                ok=(202,),
             )
+        except UpstreamUnavailableError as exc:
+            # Timeout or 5xx: Azure may have accepted the swap anyway. (4xx and 429 are definite: nothing started.)
+            raise self._unknown_outcome(f"the swap request failed ({exc.message})", path=post_path) from exc
 
+        # From here on Azure has accepted the swap: any exit other than a final status is "outcome unknown".
+        try:
+            operation_url = self._operation_url(response, post_path)
+            operation, polls = await self._wait_for_operation(operation_url, response, started, timeout)
+        except OperationFailedError:
+            raise
+        except IntegrationError as exc:
+            raise self._unknown_outcome(exc.message, path=OPERATION_LOG_PATH) from exc
+
+        target_after = await self.get_slot(target)
+        if target_after.release != release:
+            raise ConflictError(
+                f"Swap succeeded, but target slot {target!r} runs release {target_after.release!r}, not requested release {release!r}.",
+                service=self._http.service,
+                method="GET",
+                path=self._resource(target)[0],
+            )
+        return SwapResult(
+            source=source,
+            target=target,
+            status="Succeeded",
+            target_release_before=target_before.release,
+            target_release_after=target_after.release,
+            # Always the URL's last segment: ARM's "id" field is a resource path that embeds the subscription id.
+            operation_id=operation_url.path.rstrip("/").rsplit("/", 1)[-1],
+            polls=polls,
+        )
+
+    def _unknown_outcome(self, reason: str, *, path: str) -> UpstreamUnavailableError:
+        return UpstreamUnavailableError(
+            f"Azure swap outcome is unknown: {reason}. Re-read slot state before acting; calling swap() again is safe.",
+            service=self._http.service,
+            method="POST",
+            path=path,
+        )
+
+    def _operation_url(self, response: httpx.Response, post_path: str) -> httpx.URL:
+        header = response.headers.get("Azure-AsyncOperation")
+        if not header:
+            raise IntegrationError("the swap response had no Azure-AsyncOperation URL", service=self._http.service, path=post_path)
+        try:
+            url = self._http.base_url.join(header)
+        except httpx.InvalidURL as exc:
+            raise IntegrationError("Azure returned an invalid Azure-AsyncOperation URL", service=self._http.service, path=post_path) from exc
+        base = self._http.base_url
+        if (url.scheme, url.host, url.port) != (base.scheme, base.host, base.port):
+            # Never send the bearer token to another host.
+            raise IntegrationError(
+                f"Azure-AsyncOperation URL must use the ARM host; received {url.host!r}", service=self._http.service, path=post_path
+            )
+        return url
+
+    async def _wait_for_operation(
+        self, operation_url: httpx.URL, response: httpx.Response, started: float, timeout: float
+    ) -> tuple[dict[str, Any], int]:
+        """Poll until the operation is final. Returns (operation body, polls) on Succeeded."""
         retry_after = parse_retry_after(response.headers.get("Retry-After"))
         polls = 0
         while True:
             remaining = timeout - (self._clock() - started)
-            if remaining <= 0:
-                raise UpstreamUnavailableError(
-                    f"Azure swap outcome is unknown after waiting {timeout:g} seconds.",
-                    service=self._http.service,
-                    method="GET",
-                    path=OPERATION_LOG_PATH,
-                )
-            wait = self.poll_interval if retry_after is None else retry_after
-            await self._sleep(min(wait, remaining))
+            if remaining > 0:
+                wait = self.poll_interval if retry_after is None else retry_after
+                await self._sleep(min(wait, remaining))
             if self._clock() - started >= timeout:
-                raise UpstreamUnavailableError(
-                    f"Azure swap outcome is unknown after waiting {timeout:g} seconds.",
-                    service=self._http.service,
-                    method="GET",
-                    path=OPERATION_LOG_PATH,
-                )
+                raise IntegrationError(f"no final status after {timeout:g} seconds", service=self._http.service, path=OPERATION_LOG_PATH)
 
-            poll_response = await self._http.request(
-                "GET",
-                str(operation_url),
-                params=None,
-                log_path=OPERATION_LOG_PATH,
-            )
+            poll_response = await self._http.request("GET", str(operation_url), log_path=OPERATION_LOG_PATH)
             polls += 1
             operation = poll_response.json()
             status = operation.get("status")
             if status == "Succeeded":
-                target_after = await self.get_slot(target)
-                if target_after.release != release:
-                    raise ConflictError(
-                        f"Swap succeeded, but target slot {target!r} runs release "
-                        f"{target_after.release!r}, not requested release {release!r}.",
-                        service=self._http.service,
-                        method="GET",
-                        path=self._resource(target)[0],
-                        status=poll_response.status_code,
-                    )
-                operation_id = operation.get("id") or operation_url.path.rstrip("/").rsplit("/", 1)[-1]
-                return SwapResult(
-                    source=source,
-                    target=target,
-                    status="Succeeded",
-                    target_release_before=target_before.release,
-                    target_release_after=target_after.release,
-                    operation_id=operation_id,
-                    polls=polls,
-                )
+                return operation, polls
             if status in {"Failed", "Canceled"}:
-                message = vendor_message(operation) or f"Azure swap operation ended with status {status}."
-                raise OperationFailedError(
-                    message,
-                    service=self._http.service,
-                    method="GET",
-                    path=OPERATION_LOG_PATH,
-                    status=poll_response.status_code,
-                )
+                message = vendor_message(operation) or f"Azure swap operation ended with status {status}"
+                raise OperationFailedError(message, service=self._http.service, method="GET", path=OPERATION_LOG_PATH, status=poll_response.status_code)
             if status != "InProgress":
-                raise IntegrationError(
-                    f"Azure swap operation returned unexpected status {status!r}.",
-                    service=self._http.service,
-                    method="GET",
-                    path=OPERATION_LOG_PATH,
-                    status=poll_response.status_code,
-                )
+                raise IntegrationError(f"unexpected operation status {status!r}", service=self._http.service, path=OPERATION_LOG_PATH)
             retry_after = parse_retry_after(poll_response.headers.get("Retry-After"))

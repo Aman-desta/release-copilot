@@ -190,3 +190,34 @@ async def test_polls_are_logged_as_a_template(mock_env, clock, caplog):
     async with make(Mocks(), clock) as az:
         await az.swap(release="2.4.0-rc.1")
     assert "operationResults" not in caplog.text and SUBSCRIPTION not in caplog.text
+
+
+# ------------------------------------------------------------------------------- unknown outcomes (review)
+
+
+async def test_poll_failures_after_the_post_mean_outcome_unknown(mock_env, clock):
+    mocks = Mocks()
+    operations = f"/azure/management/subscriptions/{SUBSCRIPTION}/providers/Microsoft.Web/locations"
+    mocks.fault(operations, status=503)  # every poll fails, even after ServiceClient's retries
+    async with make(mocks, clock) as az:
+        with pytest.raises(UpstreamUnavailableError, match="outcome is unknown") as info:
+            await az.swap(release="2.4.0-rc.1")
+    assert isinstance(info.value.__cause__, UpstreamUnavailableError)  # the underlying reason is kept
+    assert len(swap_posts(mocks)) == 1  # and nothing was re-sent
+
+
+async def test_ambiguous_post_failure_is_outcome_unknown_but_4xx_is_not(mock_env, clock):
+    mocks = Mocks()
+    async with make(mocks, clock) as az:
+        mocks.fault("/azure/management", status=504, method="POST", times=1)
+        with pytest.raises(UpstreamUnavailableError, match="outcome is unknown"):
+            await az.swap(release="2.4.0-rc.1")
+        mocks.fault("/azure/management", status=409, method="POST", times=1)  # e.g. another swap in progress
+        with pytest.raises(ConflictError):
+            await az.swap(release="2.4.0-rc.1")
+
+
+async def test_operation_id_never_contains_the_subscription(mock_env, clock):
+    async with make(Mocks(), clock) as az:
+        result = await az.swap(release="2.4.0-rc.1")
+    assert result.operation_id and "/" not in result.operation_id and SUBSCRIPTION not in result.operation_id
