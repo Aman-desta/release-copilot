@@ -1,6 +1,6 @@
 # Release Copilot: Foundations and Integration Layer, High-Level Design
 
-**Status:** current as of T3 (Oct 2026) · **Scope:** platform foundations (F1–F3) and the integration layer (T1–T3).
+**Status:** current as of T4 (Oct 2026) · **Scope:** platform foundations (F1–F3) and the integration layer (T1–T4).
 Agents and agent-facing tools (T5, A\*) get their own design doc.
 
 ---
@@ -23,7 +23,7 @@ flowchart LR
         A[Supervisor and workers]
     end
     subgraph rc["release-copilot (this doc)"]
-        T[Typed clients<br/>Jira · GitHub · Azure]
+        T[Typed clients<br/>Jira · GitHub · Azure<br/>Sonar · ServiceNow · Teams/Slack]
         H[ServiceClient<br/>retries · breaker · errors · logging]
         AU[Auth flows<br/>Basic · Bearer · OAuth2]
         L[Model gateway<br/>per-role models · fallbacks · cost]
@@ -175,9 +175,10 @@ What to notice:
 | **T1** HTTP core | Retries, circuit breaker, error types, auth flows, correlation ids, structured logging | `integrations/http.py`, `retry.py`, `breaker.py`, `errors.py`, `auth.py` |
 | **T2** Jira + GitHub clients | Typed domain models with evidence ids, complete paging, Atlassian rich text to Markdown, idempotent release creation | `integrations/jira.py`, `github.py`, `adf.py`, `models.py` |
 | **T3** Azure client | Slots, deployments, Monitor metrics, idempotent slot swap with long-running-operation polling | `integrations/azure.py` |
-| *T4 (next)* | SonarQube, ServiceNow and notification clients | |
+| **T4** SonarQube, ServiceNow, notifications | Measures and quality gate; change requests and approvals through an injection-safe query builder; Teams and Slack notifiers | `integrations/sonar.py`, `servicenow.py`, `notify.py` |
+| *T5 (next)* | Agent tool layer | *separate design doc* |
 
-About 140 automated tests cover this, all running without network access or a real LLM.
+About 170 automated tests cover this, all running without network access or a real LLM.
 
 ---
 
@@ -294,7 +295,8 @@ upstream is unhealthy.
 | Error | Meaning | Retryable |
 |---|---|---|
 | `AuthError` | Bad or expired credentials (401; 400 from the token endpoint) | no |
-| `PermissionDeniedError` | Not allowed (403, ServiceNow business rules) | no |
+| `PermissionDeniedError` | Not allowed (403, e.g. an ACL) | no |
+| `PolicyViolationError` | A business rule refused the *action* (ServiceNow 403, e.g. "approval can only be set by an approver") | no |
 | `NotFoundError` / `ConflictError` / `InvalidRequestError` | 404 / 409 / 400 and 422 | no |
 | `RateLimitedError` | 429, carries `retry_after` | yes |
 | `UpstreamUnavailableError` | 5xx, timeouts, connection failures; also "outcome unknown" | yes |
@@ -335,6 +337,11 @@ OAuth2 client-credentials flow:
   never advances raises an error instead of looping forever or quietly stopping.
 - **Jira comments embedded in an issue are only the first page.** When `total` is larger, the client fetches
   the rest, because a reviewer's "don't ship" could be on page 2.
+- **Offset paging needs a stable order.** ServiceNow pages with `sysparm_offset`, and without an explicit order a
+  record can appear on two pages or on none, especially when the table changes between requests. The client
+  adds `ORDERBYsys_id` when a query has no order and never returns the same record twice. It reads until
+  `X-Total-Count` records are in, and an empty page before that raises an error. (Cursor-based paging, like
+  Jira's next-page token, avoids the problem by design.)
 - **Only requested fields:** clients ask for exactly the fields they map, so payloads stay small and fields we
   didn't choose can't leak in.
 
@@ -345,6 +352,11 @@ OAuth2 client-credentials flow:
 - **A slot swap is a toggle, so we never "just swap".** The API is *"make sure production runs release X"*: check
   first; if it already does, nothing happens; if the source slot doesn't run X, refuse. Rollback is the same
   call with the previous release.
+- **Approvals are requested per approver, idempotently.** Asking an approver who already has a record returns
+  that record. A re-run never asks the same person twice, or leaves the change waiting on a duplicate nobody answers.
+- **Change requests carry a `correlation_id`** (`payments-api@2.4.0`), and lookup by it is strict: two matches
+  raise `ConflictError` instead of picking one, because silently choosing hides a duplicate. Find-before-create,
+  built on this, is A6's job.
 - **"Outcome unknown" is different from "failed".** If anything goes wrong after Azure may have accepted the
   swap (the request timed out, polling failed, the deadline passed), the client reports *outcome unknown* and
   says to re-read the state. A definite rejection (4xx, 429, or an operation that ended Failed) is reported as such.
@@ -364,14 +376,48 @@ the release; a naive retry of a change-request POST creates a duplicate. Turning
   response could trick us into sending our bearer token elsewhere.
 - **Correlation ids** (`X-Correlation-ID`) are attached to every call, so one run can be followed across services.
 
-### D13. Testing approach
+### D13. ServiceNow queries are built, never concatenated (query injection)
+
+**What.** ServiceNow filters are *encoded query strings*: `cmdb_ci=<id>^state!=4^ORDERBYsys_id`, where `^`
+means AND. Clients may only pass a `Q` object, built with `Q().eq(...).ne(...).order_by(...)`. A raw string is
+rejected with `TypeError`.
+
+**Why it matters.** Values come from tickets, agent output and users, so they are untrusted. Concatenated
+into a string, a value like `x^ORsys_id!=` adds an OR branch that matches **every record**. That's the same
+class of bug as SQL injection. `Q` closes it:
+- every `^` in a value is escaped as `^^`, so it stays part of the value
+- field names must match a strict pattern, so a "field" can't smuggle in operators
+- values inside `IN` lists can't contain commas, because a comma can't be escaped there
+- `Q` is immutable, so a shared base query can't be changed by accident
+
+**Trade-off.** Only AND conditions are supported. OR queries can be added to `Q` when a story needs them, and
+they'll get the same escaping.
+
+### D14. Notifications are delivered at least once, and escaped
+
+**What.** `TeamsNotifier` (Adaptive Card) and `SlackNotifier` (Block Kit) share one `Notifier` interface.
+`notify_all()` sends to every configured channel and reports a result per channel.
+
+**Why it matters.**
+- **At least once, not at most once.** Sends are retried, so a rare duplicate message is possible. Losing an
+  approval request is worse than seeing it twice, and the message is only a pointer: ServiceNow holds the real
+  state. One failing channel doesn't stop the others.
+- **Untrusted text is escaped for Slack.** Ticket titles and agent summaries could otherwise produce
+  `<!channel>` pings or links whose visible text hides where they go.
+- **The webhook URL is the credential.** It's never logged (requests appear as `{webhook}`). The client's base
+  URL is only the webhook's scheme and host, and the secret path is sent per request. A whole webhook URL can't
+  be the base, because httpx adds a trailing `/`. Posting to `…/path/` got a redirect, and since redirects
+  aren't followed, it surfaced as an error the tests caught.
+
+### D15. Testing approach
 
 - **The mocks run inside the test process,** through `httpx.ASGITransport`: no server, no network.
 - **A fake clock and a fake sleep** make retry, backoff, token expiry and breaker tests instant and deterministic.
 - **Specs are written as tests first** (`test_retry.py`, `test_oauth.py`, `test_adf.py`, `test_jira.py`,
-  `test_azure.py`) and checked against a throwaway reference implementation, so the spec itself is known to be achievable.
+  `test_azure.py`, `test_servicenow.py`) and checked against a throwaway reference implementation, so the spec itself is known to be achievable.
 - **`RewritingTransport`** edits mock responses to imitate vendor behaviour the mocks don't have, such as a
-  missing `isLast`, truncated comments, or a foreign operation URL.
+  missing `isLast`, truncated comments, a foreign operation URL, references without links, or a record repeated
+  across pages.
 - **Database tests** run against the real Postgres when `RELEASE_COPILOT_TEST_DATABASE_URL` is set, and are skipped otherwise.
 
 ---
@@ -386,6 +432,9 @@ the release; a naive retry of a change-request POST creates a duplicate. Turning
 | Race between checking the slots and swapping (another deployer acts in between) | Detected by the check after the swap | A7 change window / single writer |
 | Hand-written OAuth and long-running-operation polling | A deliberate learning choice | Wrap `azure-identity` / `azure-mgmt-web` in production |
 | Prices in `pricing.py` are hard-coded | Cost is advisory | Check against provider pricing before relying on it |
+| `update_change` turns every 403 into `PolicyViolationError`, including ACL refusals | ServiceNow uses the same error shape for both | Refine if ACL errors show up in practice |
+| `update_change` sends any field (no allow-list); a detected duplicate `correlation_id` reports `status=409` though no HTTP 409 occurred | Callers are internal; values are validated by ServiceNow | Typed update model in A6 |
+| ServiceNow queries support AND only | No current story needs OR | Extend `Q` when one does |
 
 ## 6. Glossary
 
@@ -396,3 +445,6 @@ the release; a naive retry of a change-request POST creates a duplicate. Turning
 - **Single flight:** concurrent callers share one in-progress operation, for example one token request.
 - **Long-running operation (LRO):** an Azure request that returns `202` and a URL to poll until it finishes.
 - **ADF:** Atlassian Document Format, the JSON tree Jira uses for rich text.
+- **Encoded query:** ServiceNow's filter string (`field=value^field2!=x`); `^` means AND.
+- **Query injection:** untrusted input changing the meaning of a query, because it was concatenated in, not escaped.
+- **At-least-once delivery:** a message is retried until it's acknowledged, so it may arrive twice but isn't lost.

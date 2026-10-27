@@ -4,7 +4,8 @@ Callers (and agents, via the tool layer in T5) branch on the *type*, never on ve
 
     IntegrationError
     ├── AuthError                 401: bad or expired credentials
-    ├── PermissionDeniedError     403: authenticated, but not allowed (ACLs, business rules)
+    ├── PermissionDeniedError     403: authenticated, but not allowed (ACLs)
+    │   └── PolicyViolationError  403 from a business rule: this action is not allowed (ServiceNow)
     ├── NotFoundError             404
     ├── ConflictError             409
     ├── InvalidRequestError       400 / 422: our request is wrong; never retried
@@ -67,6 +68,11 @@ class AuthError(IntegrationError):
 
 class PermissionDeniedError(IntegrationError):
     pass
+
+
+class PolicyViolationError(PermissionDeniedError):
+    """The system of record refused the action on business rules (e.g. ServiceNow: "approval can only be set by
+    an approver"). Not a credentials problem and not retryable: the *action* is not allowed."""
 
 
 class NotFoundError(IntegrationError):

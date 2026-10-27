@@ -11,6 +11,9 @@ from release_copilot.integrations.azure import AzureAppServiceClient
 from release_copilot.integrations.github import GITHUB_HEADERS, GitHubClient
 from release_copilot.integrations.http import ServiceClient
 from release_copilot.integrations.jira import JiraClient
+from release_copilot.integrations.notify import Notifier, SlackNotifier, TeamsNotifier, split_webhook
+from release_copilot.integrations.servicenow import ServiceNowClient
+from release_copilot.integrations.sonar import SonarClient
 
 
 def jira_client(settings: Settings | None = None, *, transport: httpx.AsyncBaseTransport | None = None) -> JiraClient:
@@ -43,3 +46,28 @@ def azure_client(settings: Settings | None = None, *, transport: httpx.AsyncBase
     client = AzureAppServiceClient(http, subscription_id=s.subscription_id, resource_group=s.resource_group, site=s.site)
     client.on_close(token_http.aclose)
     return client
+
+
+def sonar_client(settings: Settings | None = None, *, transport: httpx.AsyncBaseTransport | None = None) -> SonarClient:
+    s = (settings or get_settings()).sonar
+    http = ServiceClient("sonar", str(s.base_url), auth=BearerToken(s.token), transport=transport)
+    return SonarClient(http, project_key=s.project_key)
+
+
+def servicenow_client(settings: Settings | None = None, *, transport: httpx.AsyncBaseTransport | None = None) -> ServiceNowClient:
+    s = (settings or get_settings()).servicenow
+    http = ServiceClient("servicenow", str(s.base_url), auth=basic_auth(s.user, s.password), transport=transport)
+    return ServiceNowClient(http)
+
+
+def notifiers(settings: Settings | None = None, *, transport: httpx.AsyncBaseTransport | None = None) -> list[Notifier]:
+    """One notifier per configured webhook (both are optional)."""
+    s = (settings or get_settings()).notify
+    out: list[Notifier] = []
+    if s.teams_webhook_url:
+        base, path = split_webhook(s.teams_webhook_url.get_secret_value())
+        out.append(TeamsNotifier(ServiceClient("teams", base, transport=transport), webhook_path=path))
+    if s.slack_webhook_url:
+        base, path = split_webhook(s.slack_webhook_url.get_secret_value())
+        out.append(SlackNotifier(ServiceClient("slack", base, transport=transport), webhook_path=path))
+    return out

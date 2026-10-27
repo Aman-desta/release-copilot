@@ -16,8 +16,8 @@ Each story's status goes at the end of its `###` heading line: *(none)* = open �
 
 | Status | Stories |
 |---|---|
-| Done | F1, F2, F3, T1, T2, T3 |
-| Next up | T4 → T5 |
+| Done | F1, F2, F3, T1, T2, T3, T4 |
+| Next up | T5 → A1 |
 
 **Suggested order:** F2, F3, T1, T2, T3, T4, T5 → A1, A2, A3 (first end-to-end run) → O1 (trace everything from here on) →
 A4, A5, P1, A6, A7, A8 → P2, P3 → G1, G2 → O2, O3, O4 → M1, M2 → S1, S2, S3 → X1, X2.
@@ -119,7 +119,7 @@ descriptions, and finding the `coverage_drop` hotfix commit as having no PR.
 
 **Acceptance:** in `failed_deploy`, swap → metrics show a 5xx rate above 10% in production; swap back → it recovers.
 
-### T4 [P0, S] SonarQube, ServiceNow and notification clients
+### T4 [P0, S] SonarQube, ServiceNow and notification clients — ✅ Done
 - `SonarClient`: measures (handles both `value` and `period.value`), quality gate with conditions.
 - `ServiceNowClient`: a small query builder (`Q().eq().like().order_by_desc()` → `sysparm_query`), reads
   references (`{link, value}`), `create_change`, `update_change`, `request_approval`, typed `ChangeRequest`.

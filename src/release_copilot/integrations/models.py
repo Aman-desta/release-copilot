@@ -5,10 +5,10 @@ human-readable reference that the release document cites and the validator check
 """
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 TICKET_KEY = re.compile(r"\b[A-Z][A-Z0-9]+-\d+\b")
 
@@ -288,3 +288,176 @@ class SwapResult(_Model):
     target_release_after: str | None
     operation_id: str | None = None  # None when no swap was needed
     polls: int = 0
+
+
+# ------------------------------------------------------------------------------------------- SonarQube
+
+
+class Measures(_Model):
+    project_key: str
+    branch: str
+    values: dict[str, float]  # metric -> value; new-code metrics (new_*) included
+
+    def get(self, metric: str) -> float | None:
+        return self.values.get(metric)
+
+    @property
+    def evidence_id(self) -> str:
+        return f"sonar:measures:{self.branch}"
+
+
+class QualityCondition(_Model):
+    metric: str
+    comparator: str  # LT | GT
+    threshold: str
+    actual: str | None = None
+    status: str  # OK | ERROR | WARN | NONE
+
+
+class QualityGate(_Model):
+    project_key: str
+    branch: str
+    status: str  # OK | ERROR | WARN | NONE
+    conditions: tuple[QualityCondition, ...]
+
+    @property
+    def passed(self) -> bool:
+        return self.status == "OK"
+
+    @property
+    def failing(self) -> tuple[QualityCondition, ...]:
+        return tuple(c for c in self.conditions if c.status == "ERROR")
+
+    @property
+    def evidence_id(self) -> str:
+        return f"sonar:gate:{self.branch}"
+
+
+# ------------------------------------------------------------------------------------------ ServiceNow
+
+CHANGE_STATES = {"-5": "New", "-4": "Assess", "-3": "Authorize", "-2": "Scheduled", "-1": "Implement", "0": "Review", "3": "Closed", "4": "Canceled"}
+RISK_LEVELS = {"1": "Very High", "2": "High", "3": "Moderate", "4": "Low"}
+ChangeType = Literal["normal", "standard", "emergency"]
+RiskCode = Literal["1", "2", "3", "4"]
+ImpactCode = Literal["1", "2", "3"]
+
+
+def parse_snow_datetime(value: str | datetime | None) -> datetime | None:
+    """ServiceNow sends ``2026-09-02 19:00:00`` in UTC (no zone) and ``""`` for empty dates."""
+    if value is None or isinstance(value, datetime):
+        return value
+    if not value:
+        return None
+    return datetime.fromisoformat(value.replace(" ", "T")).replace(tzinfo=timezone.utc)
+
+
+def format_snow_datetime(value: datetime) -> str:
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+class ChangeRequestDraft(_Model):
+    """What the copilot sends to create a change. Validated *before* anything goes over the wire."""
+
+    short_description: str = Field(min_length=1, max_length=160)
+    description: str = ""
+    type: ChangeType = "normal"
+    risk: RiskCode = "3"
+    impact: ImpactCode = "3"
+    cmdb_ci: str | None = None  # sys_id
+    assignment_group: str | None = None  # sys_id
+    start_date: datetime | None = None
+    end_date: datetime | None = None
+    implementation_plan: str = ""
+    backout_plan: str = ""
+    test_plan: str = ""
+    justification: str = ""
+    correlation_id: str = Field(min_length=1)  # e.g. "payments-api@2.4.0": what makes creation idempotent (A6)
+
+    def to_snow(self) -> dict[str, str]:
+        """Table API body: every value a string, dates in ServiceNow's format, empty optionals omitted."""
+        body: dict[str, str] = {}
+        for name, value in self:
+            if value is None or value == "":
+                continue
+            body[name] = format_snow_datetime(value) if isinstance(value, datetime) else str(value)
+        return body
+
+
+class ChangeRequest(_Model):
+    sys_id: str
+    number: str
+    short_description: str
+    description: str = ""
+    type: str
+    state: str  # code, see CHANGE_STATES
+    risk: str  # code, see RISK_LEVELS
+    impact: str
+    approval: str  # not requested | requested | approved | rejected
+    cmdb_ci: str | None = None
+    assignment_group: str | None = None
+    correlation_id: str = ""
+    start_date: datetime | None = None
+    end_date: datetime | None = None
+    implementation_plan: str = ""
+    backout_plan: str = ""
+    test_plan: str = ""
+    justification: str = ""
+    close_code: str = ""
+    close_notes: str = ""
+    created: datetime | None = None
+    updated: datetime | None = None
+
+    _parse_dates = field_validator("start_date", "end_date", "created", "updated", mode="before")(lambda cls, v: parse_snow_datetime(v))
+
+    @property
+    def state_label(self) -> str:
+        return CHANGE_STATES.get(self.state, self.state)
+
+    @property
+    def risk_label(self) -> str:
+        return RISK_LEVELS.get(self.risk, self.risk)
+
+    @property
+    def evidence_id(self) -> str:
+        return f"snow:change:{self.number}"
+
+
+class Approval(_Model):
+    sys_id: str
+    change_sys_id: str
+    approver_sys_id: str
+    group_sys_id: str | None = None
+    state: str  # requested | approved | rejected
+    comments: str = ""
+    created: datetime | None = None
+
+    _parse_created = field_validator("created", mode="before")(lambda cls, v: parse_snow_datetime(v))
+
+
+class SnowUser(_Model):
+    sys_id: str
+    user_name: str
+    name: str
+    email: str = ""
+    title: str = ""
+
+
+class SnowGroup(_Model):
+    sys_id: str
+    name: str
+    manager_sys_id: str | None = None
+    type: str = ""
+
+
+class ConfigurationItem(_Model):
+    sys_id: str
+    name: str
+    business_criticality: str = ""
+    used_for: str = ""
+    support_group_sys_id: str | None = None
+    owned_by_sys_id: str | None = None
+    short_description: str = ""
+
+    @property
+    def evidence_id(self) -> str:
+        return f"snow:ci:{self.name}"
