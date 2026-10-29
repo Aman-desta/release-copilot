@@ -1,6 +1,6 @@
 {
   "function": {
-    "description": "Add a Markdown comment to a Jira issue. Reusing the same idempotency key will not add another comment.",
+    "description": "Add a Markdown comment to a Jira issue with a short visible audit reference. Reusing the same idempotency key will not add another comment.",
     "name": "jira_add_comment",
     "parameters": {
       "properties": {

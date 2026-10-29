@@ -9,7 +9,7 @@ Required tools (names are part of the contract):
   issues are not done), type, priority, assignee, labels, components.
 - ``jira_get_issue(key)``: one issue in full: description and comments as Markdown.
 - ``jira_add_comment(key, text, idempotency_key)``: access="write". Posting twice with the same key must
-  leave ONE comment: Jira has no idempotency keys, so embed a marker in the comment and check for it first.
+  leave ONE comment: Jira has no idempotency keys, so append a visible audit reference and check for it first.
 
 Security: ``fix_version`` and ``key`` end up inside JQL or a URL. Validate them with strict patterns in the
 argument schema, and quote the JQL value (JQL injection is the Jira version of what ``Q`` prevents).
@@ -101,7 +101,7 @@ RELEASE_FIELDS = ("summary", "issuetype", "status", "priority", "assignee", "lab
 
 def _comment_marker(idempotency_key: str) -> str:
     digest = hashlib.sha256(idempotency_key.encode()).hexdigest()
-    return f"<!-- release-copilot-idempotency:{digest} -->"
+    return f"— posted by release-copilot · ref {digest[:16]}"
 
 
 def _comment_id(key: str, comment_id: str) -> str:
@@ -221,7 +221,10 @@ def build(box: "Toolbox") -> list[BaseTool]:
         make_tool(
             lambda a: _add_comment(box, a),
             name="jira_add_comment",
-            description="Add a Markdown comment to a Jira issue. Reusing the same idempotency key will not add another comment.",
+            description=(
+                "Add a Markdown comment to a Jira issue with a short visible audit reference. "
+                "Reusing the same idempotency key will not add another comment."
+            ),
             args_schema=AddCommentArgs,
             access="write",
             domain="jira",
