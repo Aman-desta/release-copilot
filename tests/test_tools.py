@@ -244,17 +244,41 @@ async def test_jira_get_issue_not_found_is_structured(box):
 async def test_jira_add_comment_is_idempotent(mock_env):
     mocks = Mocks()
     idempotency_key = "run-42:pay-102:release-note"
+    digest = hashlib.sha256(idempotency_key.encode()).hexdigest()[:16]
     async with toolbox(mocks) as b:
         post = by_name(b.tools(access={"write"}), "jira_add_comment")
         first = await call(post, key="PAY-102", text="Included in release 2.4.0.", idempotency_key=idempotency_key)
+        comments = mocks.state.world()["jira"]["issues"]["PAY-102"]["fields"]["comment"]["comments"]
+        assert len(comments) == 2  # the seeded comment + exactly one of ours
+        assert content(first)["ok"]
+        assert ids_in(content(first)["data"])
+
+        comments[-1]["body"] = {
+            "type": "doc",
+            "version": 1,
+            "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": "Keep before"}]},
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {"type": "text", "text": "— edited! REF "},
+                        {"type": "text", "text": digest, "marks": [{"type": "strong"}]},
+                        {"type": "text", "text": " (updated)"},
+                    ],
+                },
+                {"type": "paragraph", "content": [{"type": "text", "text": "Keep after"}]},
+            ],
+        }
         again = await call(post, key="PAY-102", text="Included in release 2.4.0.", idempotency_key=idempotency_key)
-    comments = mocks.state.world()["jira"]["issues"]["PAY-102"]["fields"]["comment"]["comments"]
-    assert len(comments) == 2  # the seeded comment + exactly one of ours
-    assert content(first)["ok"] and content(again)["ok"]
+
+    assert len(comments) == 2
+    assert content(again)["ok"]
     assert ids_in(content(first)["data"]) == ids_in(content(again)["data"])  # the same comment both times
+    result_body = content(again)["data"]["body_markdown"]
+    assert "Keep before" in result_body and "Keep after" in result_body
+    assert digest not in result_body and "edited!" not in result_body
     stored_body = json.dumps(comments[-1]["body"], ensure_ascii=False)
-    audit_trail = f"— posted by release-copilot · ref {hashlib.sha256(idempotency_key.encode()).hexdigest()[:16]}"
-    assert audit_trail in stored_body
+    assert "— edited! REF " in stored_body and digest in stored_body
     assert "<!-- release-copilot-idempotency:" not in stored_body
 
 
