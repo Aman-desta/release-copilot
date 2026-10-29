@@ -17,8 +17,8 @@ ISSUE_PATH = "/rest/api/3/issue/{key}"
 COMMENT_PAGE_SIZE = 100
 # Ask Jira only for what Issue needs: payloads stay small, and fields can't leak in by accident.
 ISSUE_FIELDS = (
-    "summary", "issuetype", "status", "priority", "assignee", "labels", "components", "fixVersions",
-    "description", "comment", "created", "updated", "resolutiondate",
+    "summary", "issuetype", "status", "priority", "assignee", "labels", "components",
+    "description", "comment", "created", "updated"
 )
 
 

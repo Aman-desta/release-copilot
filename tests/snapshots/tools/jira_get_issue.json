@@ -1,0 +1,22 @@
+{
+  "function": {
+    "description": "Read one Jira issue in full, including its description and comments as Markdown.",
+    "name": "jira_get_issue",
+    "parameters": {
+      "properties": {
+        "key": {
+          "description": "Jira issue key, e.g. \"PAY-102\".",
+          "maxLength": 64,
+          "minLength": 3,
+          "pattern": "^[A-Z][A-Z0-9]*-[1-9][0-9]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    }
+  },
+  "type": "function"
+}

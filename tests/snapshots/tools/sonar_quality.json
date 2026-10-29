@@ -1,0 +1,42 @@
+{
+  "function": {
+    "description": "Read code quality for a branch: the quality gate (and which conditions fail), test coverage overall and on new code, bugs and vulnerabilities. Pass compare_to to see the change since the last release.",
+    "name": "sonar_quality",
+    "parameters": {
+      "properties": {
+        "branch": {
+          "description": "Branch to analyse, e.g. release/2.4.0.",
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._/\\-]+$",
+          "type": "string"
+        },
+        "compare_to": {
+          "anyOf": [
+            {
+              "examples": [
+                "release/2.4.0",
+                "v2.3.1",
+                "3f2a9c1"
+              ],
+              "maxLength": 100,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._/\\-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional earlier branch to compare with, e.g. release/2.3.1."
+        }
+      },
+      "required": [
+        "branch"
+      ],
+      "type": "object"
+    }
+  },
+  "type": "function"
+}

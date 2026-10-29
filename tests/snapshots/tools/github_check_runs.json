@@ -1,0 +1,22 @@
+{
+  "function": {
+    "description": "Read the CI check results (build, tests, CodeQL...) for a branch, tag or sha.",
+    "name": "github_check_runs",
+    "parameters": {
+      "properties": {
+        "ref": {
+          "description": "Branch, tag or sha whose CI checks to read, e.g. release/2.4.0.",
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._/\\-]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    }
+  },
+  "type": "function"
+}

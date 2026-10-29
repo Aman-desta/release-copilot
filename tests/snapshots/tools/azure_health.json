@@ -1,0 +1,28 @@
+{
+  "function": {
+    "description": "Read a slot's live health from Azure Monitor: 5xx error rate (latest interval and whole window), request volume and response time. Staging has little traffic, so its numbers are weak signals.",
+    "name": "azure_health",
+    "parameters": {
+      "properties": {
+        "minutes": {
+          "default": 60,
+          "description": "Look-back window in minutes (5-1440).",
+          "maximum": 1440,
+          "minimum": 5,
+          "type": "integer"
+        },
+        "slot": {
+          "default": "production",
+          "description": "Which slot to check.",
+          "enum": [
+            "production",
+            "staging"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "type": "function"
+}

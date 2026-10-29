@@ -1,0 +1,29 @@
+{
+  "function": {
+    "description": "Look up a service in the CMDB (business criticality, support group) and its recent change requests with their outcomes and close notes. Past unsuccessful changes explain known risks.",
+    "name": "servicenow_service_profile",
+    "parameters": {
+      "properties": {
+        "recent_changes": {
+          "default": 5,
+          "description": "How many recent change requests to include.",
+          "maximum": 20,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "service": {
+          "description": "Service name as registered in the CMDB, e.g. payments-api.",
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9\\-]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "service"
+      ],
+      "type": "object"
+    }
+  },
+  "type": "function"
+}

@@ -1,0 +1,22 @@
+{
+  "function": {
+    "description": "Find the pull requests that contain a commit and who approved them. Use it to check that every change was reviewed; an empty result means the commit was pushed without a pull request.",
+    "name": "github_commit_pull_requests",
+    "parameters": {
+      "properties": {
+        "sha": {
+          "description": "Commit sha (7-40 hex chars), e.g. from github_compare.",
+          "maxLength": 40,
+          "minLength": 7,
+          "pattern": "^[0-9a-f]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha"
+      ],
+      "type": "object"
+    }
+  },
+  "type": "function"
+}

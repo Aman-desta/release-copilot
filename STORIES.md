@@ -128,7 +128,7 @@ descriptions, and finding the `coverage_drop` hotfix commit as having no PR.
 
 **Acceptance:** creating a change and then trying `approval=approved` raises `PolicyViolationError`; the quality gate in `coverage_drop` is parsed as failed, along with the failing condition.
 
-### T5 [P0, M] Agent tool layer
+### T5 [P0, M] Agent tool layer — 🔵 In progress
 **As** an agent **I need** tools with tight schemas and compact outputs **so that** tool use is reliable and cheap.
 - LangChain `@tool`s (or `StructuredTool`) over T2–T4 with Pydantic argument schemas, docstrings written for the model, and enums where possible.
 - Outputs are **compact, LLM-friendly Pydantic models**, not raw vendor JSON; long text is truncated with a

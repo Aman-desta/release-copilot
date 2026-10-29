@@ -1,0 +1,22 @@
+{
+  "function": {
+    "description": "List every issue in a Jira fix version for release review. Shows summary, completion status, type, priority, assignee, labels and components; descriptions and comments are omitted.",
+    "name": "jira_release_issues",
+    "parameters": {
+      "properties": {
+        "fix_version": {
+          "description": "Fix version in major.minor.patch form, e.g. \"2.4.0\".",
+          "maxLength": 50,
+          "minLength": 5,
+          "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fix_version"
+      ],
+      "type": "object"
+    }
+  },
+  "type": "function"
+}

@@ -1,0 +1,22 @@
+{
+  "function": {
+    "description": "List open security alerts: vulnerable dependencies (Dependabot, with CVE and fixed version) and code-scanning findings (CodeQL) on a branch, worst severity first.",
+    "name": "github_security_alerts",
+    "parameters": {
+      "properties": {
+        "ref": {
+          "description": "Branch to read code-scanning alerts for, e.g. release/2.4.0.",
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._/\\-]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "type": "object"
+    }
+  },
+  "type": "function"
+}

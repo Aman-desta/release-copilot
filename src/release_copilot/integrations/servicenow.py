@@ -319,6 +319,11 @@ class ServiceNowClient:
             )
         return None
 
+    async def get_group_by_id(self, sys_id: str) -> SnowGroup | None:
+        async for raw in self.records("sys_user_group", Q().eq("sys_id", sys_id)):
+            return SnowGroup(sys_id=raw["sys_id"], name=raw["name"], manager_sys_id=raw.get("manager") or None, type=raw.get("type", ""))
+        return None
+
     async def get_user(self, sys_id: str) -> SnowUser | None:
         async for raw in self.records("sys_user", Q().eq("sys_id", sys_id)):
             return SnowUser(

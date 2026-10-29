@@ -1,0 +1,11 @@
+{
+  "function": {
+    "description": "Show which release runs in each App Service slot (production, staging), with the active deployment and recent deployment history. Use it to know what a swap would change and what a rollback restores.",
+    "name": "azure_slots",
+    "parameters": {
+      "properties": {},
+      "type": "object"
+    }
+  },
+  "type": "function"
+}
