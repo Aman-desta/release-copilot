@@ -1,7 +1,7 @@
 # Release Copilot: Foundations and Integration Layer, High-Level Design
 
 **Status:** current as of T4 (Oct 2026) · **Scope:** platform foundations (F1–F3) and the integration layer (T1–T4).
-Agents and agent-facing tools (T5, A\*) get their own design doc.
+Agents and agent-facing tools (T5, A\*) are in [design-agents-and-tools.md](design-agents-and-tools.md).
 
 ---
 
@@ -176,7 +176,7 @@ What to notice:
 | **T2** Jira + GitHub clients | Typed domain models with evidence ids, complete paging, Atlassian rich text to Markdown, idempotent release creation | `integrations/jira.py`, `github.py`, `adf.py`, `models.py` |
 | **T3** Azure client | Slots, deployments, Monitor metrics, idempotent slot swap with long-running-operation polling | `integrations/azure.py` |
 | **T4** SonarQube, ServiceNow, notifications | Measures and quality gate; change requests and approvals through an injection-safe query builder; Teams and Slack notifiers | `integrations/sonar.py`, `servicenow.py`, `notify.py` |
-| *T5 (next)* | Agent tool layer | *separate design doc* |
+| **T5** Agent tool layer | Covered in its own doc | [design-agents-and-tools.md](design-agents-and-tools.md) |
 
 About 170 automated tests cover this, all running without network access or a real LLM.
 
@@ -427,7 +427,7 @@ they'll get the same escaping.
 | Item | Why it's acceptable for now | Where it gets addressed |
 |---|---|---|
 | POST is never retried, even after a 429 or connection refused (cases where the request was certainly not processed) | Safe, slightly too strict | Idempotency keys (A6) |
-| A Jira issue with an unexpected shape raises a bare `KeyError` | Rare; the mocks are well-formed | T5 tool layer (structured errors) |
+| A Jira issue with an unexpected shape raises a bare `KeyError` from the client | Rare; the mocks are well-formed | Done in T5: tools turn it into a structured `UnexpectedResponse` (agents doc, D19) |
 | Bold or italic text that ends in a space renders as literal `**…**` | Cosmetic for an LLM reader | Small ADF fix |
 | Race between checking the slots and swapping (another deployer acts in between) | Detected by the check after the swap | A7 change window / single writer |
 | Hand-written OAuth and long-running-operation polling | A deliberate learning choice | Wrap `azure-identity` / `azure-mgmt-web` in production |
