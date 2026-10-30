@@ -10,6 +10,8 @@ Required tools (names are part of the contract):
 - ``jira_get_issue(key)``: one issue in full: description and comments as Markdown.
 - ``jira_add_comment(key, text, idempotency_key)``: access="write". Posting twice with the same key must
   leave ONE comment: Jira has no idempotency keys, so append a visible audit reference and check for it first.
+  The read-before-write check is at-least-once: concurrent calls can race; an ``asyncio.Lock`` would only
+  serialize calls within this process, not across workers.
 
 Security: ``fix_version`` and ``key`` end up inside JQL or a URL. Validate them with strict patterns in the
 argument schema, and quote the JQL value (JQL injection is the Jira version of what ``Q`` prevents).
@@ -64,6 +66,9 @@ class ReleaseIssueView(View):
 
 
 class ReleaseIssuesView(View):
+    total: int
+    not_done_count: int  # survives even if the id list itself is truncated
+    not_done_ids: list[str]
     issues: list[ReleaseIssueView]
 
 
@@ -95,19 +100,31 @@ class AddedCommentView(View):
     author: str
     created: str
     body_markdown: str
+    already_posted: bool
 
 
 RELEASE_FIELDS = ("summary", "issuetype", "status", "priority", "assignee", "labels", "components", "created", "updated")
+# The footer format lives here only: the marker we write, the per-key dedupe match and the generic strip are all
+# built from it, so they cannot drift. Matching needs just "ref <digest>" so it survives human edits and formatting.
+_REF_TEMPLATE = r"\bref\b[^\w\r\n]*{digest}\b"
+_ANY_FOOTER = re.compile(_REF_TEMPLATE.format(digest="[0-9a-f]{16}"), re.IGNORECASE)
+
+
+def _digest(idempotency_key: str) -> str:
+    return hashlib.sha256(idempotency_key.encode()).hexdigest()[:16]
 
 
 def _comment_marker(idempotency_key: str) -> str:
-    digest = hashlib.sha256(idempotency_key.encode()).hexdigest()
-    return f"— posted by release-copilot · ref {digest[:16]}"
+    return f"— posted by release-copilot · ref {_digest(idempotency_key)}"
 
 
 def _comment_marker_pattern(idempotency_key: str) -> re.Pattern[str]:
-    digest = hashlib.sha256(idempotency_key.encode()).hexdigest()[:16]
-    return re.compile(rf"\bref\b[^\w\r\n]*{re.escape(digest)}\b", re.IGNORECASE)
+    return re.compile(_REF_TEMPLATE.format(digest=re.escape(_digest(idempotency_key))), re.IGNORECASE)
+
+
+def _strip_footers(body: str) -> str:
+    """Drop footer lines: hidden from the model on read, and never accepted from the model on write."""
+    return "\n".join(line for line in body.splitlines() if not _ANY_FOOTER.search(line)).rstrip()
 
 
 def _comment_id(key: str, comment_id: str) -> str:
@@ -121,8 +138,12 @@ async def _release_issues(box: "Toolbox", args: ReleaseIssuesArgs) -> ToolPayloa
             f'fixVersion = "{args.fix_version}" ORDER BY key ASC', fields=RELEASE_FIELDS
         )
     ]
+    not_done_ids = [issue.evidence_id for issue in issues if not issue.is_done]
     return ToolPayload(
         view=ReleaseIssuesView(
+            total=len(issues),
+            not_done_count=len(not_done_ids),
+            not_done_ids=not_done_ids,
             issues=[
                 ReleaseIssueView(
                     id=issue.evidence_id,
@@ -150,7 +171,7 @@ async def _get_issue(box: "Toolbox", args: IssueKeyArgs) -> ToolPayload:
             id=_comment_id(issue.key, comment.id),
             author=comment.author,
             created=comment.created.isoformat(),
-            body_markdown=comment.body_markdown,
+            body_markdown=_strip_footers(comment.body_markdown),
         )
         for comment in issue.comments
     ]
@@ -182,10 +203,12 @@ async def _add_comment(box: "Toolbox", args: AddCommentArgs) -> ToolPayload:
     marker_pattern = _comment_marker_pattern(args.idempotency_key)
     issue = await box.jira.get_issue(args.key)
     comment = next((comment for comment in issue.comments if marker_pattern.search(comment.body_markdown)), None)
+    already_posted = comment is not None
     if comment is None:
-        comment = await box.jira.add_comment(args.key, f"{args.text.rstrip()}\n\n{marker}")
+        # Only we write footers: a copied one (another key's ref) would make that key's next post look done.
+        comment = await box.jira.add_comment(args.key, f"{_strip_footers(args.text)}\n\n{marker}")
 
-    body = "\n".join(line for line in comment.body_markdown.splitlines() if not marker_pattern.search(line)).rstrip()
+    body = _strip_footers(comment.body_markdown)
     comment_id = _comment_id(issue.key, comment.id)
     return ToolPayload(
         view=AddedCommentView(
@@ -194,6 +217,7 @@ async def _add_comment(box: "Toolbox", args: AddCommentArgs) -> ToolPayload:
             author=comment.author,
             created=comment.created.isoformat(),
             body_markdown=body,
+            already_posted=already_posted,
         ),
         evidence=[Evidence(comment_id, issue.url)],
         objects=[comment],

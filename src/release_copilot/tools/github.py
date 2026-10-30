@@ -197,6 +197,8 @@ class CompareView(View):
     head: str
     status: str
     ahead_by: int
+    untracked_count: int  # survives even if the id list itself is truncated
+    untracked_commit_ids: list[str]
     commits: list[CommitSummaryView]
     files: FileSummaryView
 
@@ -228,6 +230,7 @@ async def _compare(box: "Toolbox", args: CompareArgs) -> ToolPayload:
         for commit in comparison.commits
     ]
     files = comparison.files
+    untracked_commit_ids = [commit.id for commit in commits if commit.untracked]
     return ToolPayload(
         view=CompareView(
             id=comparison.evidence_id,
@@ -235,6 +238,8 @@ async def _compare(box: "Toolbox", args: CompareArgs) -> ToolPayload:
             head=comparison.head,
             status=comparison.status,
             ahead_by=comparison.ahead_by,
+            untracked_count=len(untracked_commit_ids),
+            untracked_commit_ids=untracked_commit_ids,
             commits=commits,
             files=FileSummaryView(
                 file_count=len(files),

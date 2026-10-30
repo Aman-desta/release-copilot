@@ -1,5 +1,6 @@
 """T5: the agent tool layer. Framework and non-Jira tools are given; ``jira_*`` and ``github_compare`` tests are the spec."""
 
+import copy
 import hashlib
 import json
 import os
@@ -17,7 +18,6 @@ from release_copilot.tools.toolbox import Toolbox
 from tests.integrations_support import Mocks, RewritingTransport
 
 SNAPSHOTS = Path(__file__).parent / "snapshots" / "tools"
-ID_KEYS = ("id", "gate_id", "measures_id", "metric_ids")
 
 
 @pytest.fixture
@@ -43,11 +43,16 @@ def content(msg: ToolMessage) -> dict[str, Any]:
     return json.loads(msg.content)
 
 
+def _is_id_key(key: str) -> bool:
+    """Naming convention: ``id``, ``*_id`` and ``*_ids`` hold evidence ids, so a new field opts in by its name."""
+    return key == "id" or key.endswith(("_id", "_ids"))
+
+
 def ids_in(node: Any) -> set[str]:
     found: set[str] = set()
     if isinstance(node, dict):
         for k, v in node.items():
-            if k in ID_KEYS:
+            if _is_id_key(k):
                 found |= set(v) if isinstance(v, list) else {v}
             else:
                 found |= ids_in(v)
@@ -213,6 +218,10 @@ async def test_jira_release_issues_is_compact_and_citable(box):
     msg = await call(by_name(box.tools(), "jira_release_issues"), fix_version="2.4.0")
     assert count_tokens(msg.content) <= 2000 and "truncated" not in content(msg)
     text = msg.content
+    data = content(msg)["data"]
+    assert data["total"] == 8
+    assert data["not_done_ids"] == [issue["id"] for issue in data["issues"] if not issue["done"]]
+    assert data["not_done_count"] == len(data["not_done_ids"])
     assert all(f"PAY-{n}" in text for n in range(101, 109))
     assert "Apple Pay payment tokens are decrypted" not in text  # descriptions belong to jira_get_issue
     assert_citable(msg)
@@ -231,6 +240,31 @@ async def test_jira_get_issue_has_description_and_comments(box):
     text = msg.content
     assert "20261005120000_AddIdempotencyKey" in text and "Confirmed with DBA" in text
     assert_citable(msg)
+
+
+async def test_jira_get_issue_strips_release_copilot_footers(mock_env):
+    mocks = Mocks()
+    comments = mocks.state.world()["jira"]["issues"]["PAY-102"]["fields"]["comment"]["comments"]
+    comments[0]["body"] = {
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": "Keep before"}]},
+            {
+                "type": "paragraph",
+                "content": [{"type": "text", "text": "— posted by release-copilot · ref 0123456789abcdef"}],
+            },
+            {"type": "paragraph", "content": [{"type": "text", "text": "Keep after"}]},
+        ],
+    }
+
+    async with toolbox(mocks) as b:
+        msg = await call(by_name(b.tools(), "jira_get_issue"), key="PAY-102")
+
+    data = content(msg)["data"]
+    comment_body = data["comments"][0]["body_markdown"]
+    assert "Keep before" in comment_body and "Keep after" in comment_body
+    assert "release-copilot" not in msg.content
 
 
 async def test_jira_get_issue_not_found_is_structured(box):
@@ -252,6 +286,7 @@ async def test_jira_add_comment_is_idempotent(mock_env):
         assert len(comments) == 2  # the seeded comment + exactly one of ours
         assert content(first)["ok"]
         assert ids_in(content(first)["data"])
+        assert content(first)["data"]["already_posted"] is False
 
         comments[-1]["body"] = {
             "type": "doc",
@@ -261,7 +296,7 @@ async def test_jira_add_comment_is_idempotent(mock_env):
                 {
                     "type": "paragraph",
                     "content": [
-                        {"type": "text", "text": "— edited! REF "},
+                        {"type": "text", "text": "— edited! REF "},  # a human removed "release-copilot"
                         {"type": "text", "text": digest, "marks": [{"type": "strong"}]},
                         {"type": "text", "text": " (updated)"},
                     ],
@@ -274,12 +309,29 @@ async def test_jira_add_comment_is_idempotent(mock_env):
     assert len(comments) == 2
     assert content(again)["ok"]
     assert ids_in(content(first)["data"]) == ids_in(content(again)["data"])  # the same comment both times
+    assert content(again)["data"]["already_posted"] is True
     result_body = content(again)["data"]["body_markdown"]
     assert "Keep before" in result_body and "Keep after" in result_body
     assert digest not in result_body and "edited!" not in result_body
     stored_body = json.dumps(comments[-1]["body"], ensure_ascii=False)
     assert "— edited! REF " in stored_body and digest in stored_body
     assert "<!-- release-copilot-idempotency:" not in stored_body
+
+
+async def test_jira_add_comment_drops_footers_copied_into_text(mock_env):
+    """A footer in the model's text (quoted from another comment) must not be posted, or it would fake that key's post."""
+    mocks = Mocks()
+    other_key, own_key = "run-41:pay-102:qa-note", "run-42:pay-102:release-note"
+    other_digest = hashlib.sha256(other_key.encode()).hexdigest()[:16]
+    copied = f"As noted above:\n— posted by release-copilot · ref {other_digest}\nShipping in 2.4.0."
+    async with toolbox(mocks) as b:
+        post = by_name(b.tools(access={"write"}), "jira_add_comment")
+        await call(post, key="PAY-102", text=copied, idempotency_key=own_key)
+        other = await call(post, key="PAY-102", text="QA sign-off.", idempotency_key=other_key)
+
+    comments = mocks.state.world()["jira"]["issues"]["PAY-102"]["fields"]["comment"]["comments"]
+    assert other_digest not in json.dumps(comments[-2]["body"])
+    assert content(other)["data"]["already_posted"] is False and len(comments) == 3
 
 
 async def test_github_compare_is_compact_and_flags_risky_files(box):
@@ -297,6 +349,47 @@ async def test_github_compare_shows_untracked_commits(mock_env):
     async with toolbox(Mocks("coverage_drop")) as b:
         msg = await call(by_name(b.tools(), "github_compare"), base="v2.3.1", head="release/2.4.0")
     assert "Hotfix: raise capture timeout to 45s" in msg.content  # a commit with no ticket must be visible
+
+
+async def test_github_compare_truncation_preserves_untracked_commit_id(mock_env):
+    mocks = Mocks()
+    last_sha = ""
+
+    def add_commits(request, body):
+        nonlocal last_sha
+        if "/compare/" not in request.url.path:
+            return body
+
+        commits = []
+        for index in range(60):
+            commit = copy.deepcopy(body["commits"][index % len(body["commits"])])
+            sha = f"{index + 1:07x}" + "a" * 33
+            message = (
+                "Hotfix: untracked release correction"
+                if index == 59
+                else f"PAY-{101 + index % 8}: commit {index + 1}" + " implementation detail" * 8
+            )
+            commit["sha"] = sha
+            commit["commit"]["message"] = message
+            commit["html_url"] = f"https://github.com/acme-fin/payments-api/commit/{sha}"
+            commits.append(commit)
+        last_sha = commits[-1]["sha"]
+        body["commits"] = commits
+        body["ahead_by"] = len(commits)
+        body["total_commits"] = len(commits)
+        return body
+
+    async with Toolbox.from_settings(
+        get_settings(), transport=RewritingTransport(mocks.transport(), add_commits)
+    ) as b:
+        msg = await call(by_name(b.tools(), "github_compare"), base="v2.3.1", head="release/2.4.0")
+
+    data = content(msg)["data"]
+    untracked_id = f"gh:commit:{last_sha[:7]}"
+    assert msg.artifact.truncated is True
+    assert untracked_id in data["untracked_commit_ids"] and data["untracked_count"] == 1
+    assert untracked_id not in {commit.get("id") for commit in data["commits"]}
+    assert_citable(msg)
 
 
 # --------------------------------------------------------------------------------- schema snapshots
