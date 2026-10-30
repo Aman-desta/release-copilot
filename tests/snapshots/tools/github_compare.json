@@ -1,6 +1,6 @@
 {
   "function": {
-    "description": "List what changed between two refs (previous release tag -> release branch): every commit with the Jira keys it references, plus a summary of changed files with migrations and config flagged.",
+    "description": "List what changed between two refs (previous release tag -> release branch): every commit with the Jira keys it references, plus changed files categorized by release risk.",
     "name": "github_compare",
     "parameters": {
       "properties": {

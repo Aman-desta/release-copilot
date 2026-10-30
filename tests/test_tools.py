@@ -12,6 +12,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
 from release_copilot.config import get_settings
+from release_copilot.integrations.models import ChangedFile
 from release_copilot.tools import azure, github, servicenow, sonar
 from release_copilot.tools.base import ToolArgs, ToolPayload, View, _dump, count_tokens, fit_to_budget, make_tool
 from release_copilot.tools.toolbox import Toolbox
@@ -337,12 +338,88 @@ async def test_jira_add_comment_drops_footers_copied_into_text(mock_env):
 async def test_github_compare_is_compact_and_flags_risky_files(box):
     msg = await call(by_name(box.tools(), "github_compare"), base="v2.3.1", head="release/2.4.0")
     data, text = content(msg)["data"], msg.content
+    assert data is not None
     assert count_tokens(text) <= 2000
     assert "PAY-101" in text and "PAY-108" in text  # ticket keys per commit
     assert "20261005120000_AddIdempotencyKey" in text  # migrations must stand out
     assert "appsettings.Production.json" in text  # so must production config
+    files = data["files"]
+    assert files["risk_counts"] == {"migration": 1, "config": 2, "dependencies": 1}
+    assert list(files).index("risk_counts") < list(files).index("risky_files")
+    assert files["migration_not_added"] == []
+    assert any(file["path"].endswith("host.json") for file in files["risky_files"]["config"])
     assert_citable(msg)
-    assert data is not None
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("src/Data/Migrations/20261005120000_AddIndex.cs", ["migration"]),
+        ("src/Payments/20261005120000_AddIndex.cs", ["migration"]),
+        ("database/schema.sql", ["migration"]),
+        ("src/Payments/appsettings.json", ["config"]),
+        ("src/Payments/appsettings.Production.json", ["config"]),
+        ("src/Payments/host.json", ["config"]),
+        ("src/Payments/web.config", ["config"]),
+        ("infra/main.bicep", ["infra"]),
+        ("infra/main.tf", ["infra"]),
+        ("Dockerfile", ["infra"]),
+        (".github/workflows/release.yml", ["pipeline"]),
+        ("azure-pipelines.yml", ["pipeline"]),
+        ("src/Payments/Payments.csproj", ["dependencies"]),
+        ("packages.lock.json", ["dependencies"]),
+        ("Directory.Packages.props", ["dependencies"]),
+        ("src/Payments.Migrations/Migrations/Payments.Migrations.csproj", ["dependencies"]),  # a csproj is never a migration
+        ("src/Data/Migrations/PaymentsDbContextModelSnapshot.cs", ["migration"]),
+        ("src/Data/Migrations/20261005120000_AddIndex.Designer.cs", ["migration"]),
+        ("src/Payments/appsettings.Development.json", []),
+        ("src/Payments/appsettings.Local.json", []),
+        ("docs/20261005-release-notes.md", []),
+        ("src/Data/Migrations/README.md", []),
+        ("src/products/Catalog.cs", []),
+        ("docs/migration-guide.md", []),
+        ("tests/Payments.Api.Tests/Migrations/MigrationTests.cs", []),
+    ],
+)
+def test_github_risk_categories(filename, expected):
+    file = ChangedFile(filename=filename, status="added", additions=0, deletions=0)
+    assert github._risk_categories(file) == expected
+
+
+async def test_github_compare_flags_migration_that_is_not_added(mock_env):
+    mocks = Mocks()
+
+    def modify_migration(request, body):
+        if "/compare/" in request.url.path:
+            migration = next(file for file in body["files"] if "Migrations" in file["filename"])
+            migration["status"] = "modified"
+        return body
+
+    async with Toolbox.from_settings(
+        get_settings(), transport=RewritingTransport(mocks.transport(), modify_migration)
+    ) as b:
+        msg = await call(by_name(b.tools(), "github_compare"), base="v2.3.1", head="release/2.4.0")
+
+    migration_paths = content(msg)["data"]["files"]["migration_not_added"]
+    assert any("Migrations" in path for path in migration_paths)
+
+
+async def test_github_compare_snapshot_change_is_not_a_red_flag(mock_env):
+    """Every EF Core migration modifies the ModelSnapshot: a normal migration must not trip migration_not_added."""
+    mocks = Mocks()
+    snapshot = "src/Payments.Api/Data/Migrations/PaymentsDbContextModelSnapshot.cs"
+
+    def add_snapshot(request, body):
+        if "/compare/" in request.url.path:
+            body["files"].append({"filename": snapshot, "status": "modified", "additions": 12, "deletions": 0, "changes": 12})
+        return body
+
+    async with Toolbox.from_settings(get_settings(), transport=RewritingTransport(mocks.transport(), add_snapshot)) as b:
+        msg = await call(by_name(b.tools(), "github_compare"), base="v2.3.1", head="release/2.4.0")
+
+    files = content(msg)["data"]["files"]
+    assert snapshot in [f["path"] for f in files["risky_files"]["migration"]]  # visible as part of the schema change
+    assert files["migration_not_added"] == []  # but not a red flag
 
 
 async def test_github_compare_shows_untracked_commits(mock_env):

@@ -16,8 +16,8 @@ Each story's status goes at the end of its `###` heading line: *(none)* = open �
 
 | Status | Stories |
 |---|---|
-| Done | F1, F2, F3, T1, T2, T3, T4 |
-| Next up | T5 → A1 |
+| Done | F1, F2, F3, T1, T2, T3, T4, T5 |
+| Next up | A1 |
 
 **Suggested order:** F2, F3, T1, T2, T3, T4, T5 → A1, A2, A3 (first end-to-end run) → O1 (trace everything from here on) →
 A4, A5, P1, A6, A7, A8 → P2, P3 → G1, G2 → O2, O3, O4 → M1, M2 → S1, S2, S3 → X1, X2.
@@ -128,7 +128,7 @@ descriptions, and finding the `coverage_drop` hotfix commit as having no PR.
 
 **Acceptance:** creating a change and then trying `approval=approved` raises `PolicyViolationError`; the quality gate in `coverage_drop` is parsed as failed, along with the failing condition.
 
-### T5 [P0, M] Agent tool layer — 🔵 In progress
+### T5 [P0, M] Agent tool layer — ✅ Done
 **As** an agent **I need** tools with tight schemas and compact outputs **so that** tool use is reliable and cheap.
 - LangChain `@tool`s (or `StructuredTool`) over T2–T4 with Pydantic argument schemas, docstrings written for the model, and enums where possible.
 - Outputs are **compact, LLM-friendly Pydantic models**, not raw vendor JSON; long text is truncated with a

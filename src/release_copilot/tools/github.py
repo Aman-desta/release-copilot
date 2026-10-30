@@ -183,12 +183,18 @@ class CommitSummaryView(View):
     untracked: bool
 
 
+class RiskyFileView(View):
+    path: str
+    status: str
+
+
 class FileSummaryView(View):
+    risk_counts: dict[str, int]
+    migration_not_added: list[str]
+    risky_files: dict[str, list[RiskyFileView]]
     file_count: int
     additions: int
     deletions: int
-    migrations: list[str]
-    production_config: list[str]
 
 
 class CompareView(View):
@@ -203,18 +209,31 @@ class CompareView(View):
     files: FileSummaryView
 
 
-def _is_migration(file: ChangedFile) -> bool:
-    path = file.filename.casefold()
-    name = path.rsplit("/", 1)[-1]
-    return (
-        any(part in {"migration", "migrations"} for part in path.split("/"))
-        or bool(re.match(r"^\d{8,14}[_-]", name))
-    )
+# Path rules per release-risk category (paths are casefolded, "/" separated). Facts, not judgment: deterministic,
+# auditable and unit tested; the model reasons about what a flagged file means.
+_RISK_RULES: dict[str, re.Pattern[str]] = {
+    # Code and SQL in a Migrations folder (incl. EF Core's model snapshot), timestamped EF migrations, any .sql.
+    "migration": re.compile(r"(?:^|/)migrations?/(?:[^/]+/)*[^/]+\.(?:cs|sql)$|(?:^|/)\d{14}_[^/]+\.cs$|\.sql$"),
+    # appsettings.Development/Local.json ship with the app but production never loads them.
+    "config": re.compile(
+        r"(?:^|/)appsettings(?!\.(?:development|local)\.json$)[^/]*\.json$|(?:^|/)(?:web\.config|host\.json)$"
+    ),
+    "infra": re.compile(r"\.(?:bicep|tf)$|(?:^|/)dockerfile$"),
+    "pipeline": re.compile(r"(?:^|/)\.github/workflows/.+|(?:^|/)azure-pipelines\.yml$"),
+    "dependencies": re.compile(r"\.csproj$|(?:^|/)(?:packages\.lock\.json|directory\.packages\.props)$"),
+}
+# Migrations are append-only once applied, so only these must be "added". EF Core's ModelSnapshot is part of the
+# schema change but is *modified* by every new migration, so it is categorized above and exempt here.
+_MIGRATION_SCRIPT = re.compile(r"(?:^|/)\d{14}_[^/]+\.cs$|\.sql$")
+# Known gap: GitHub's previous_filename (renames) is not mapped, so a migration moved out of its folder is missed.
 
 
-def _is_production_config(file: ChangedFile) -> bool:
-    path = file.filename.casefold()
-    return bool(re.search(r"(?:^|[._/-])(?:prod|production)(?:[._/-]|$)", path))
+def _risk_categories(file: ChangedFile) -> list[str]:
+    path = file.filename.casefold().replace("\\", "/")
+    parts = path.split("/")
+    if any(part in {"test", "tests"} or part.endswith((".test", ".tests")) for part in parts):
+        return []
+    return [category for category, pattern in _RISK_RULES.items() if pattern.search(path)]
 
 
 async def _compare(box: "Toolbox", args: CompareArgs) -> ToolPayload:
@@ -231,6 +250,16 @@ async def _compare(box: "Toolbox", args: CompareArgs) -> ToolPayload:
     ]
     files = comparison.files
     untracked_commit_ids = [commit.id for commit in commits if commit.untracked]
+    categorized_files = [(file, _risk_categories(file)) for file in files]
+    risky_files = {
+        category: [
+            RiskyFileView(path=file.filename, status=file.status)
+            for file, categories in categorized_files
+            if category in categories
+        ]
+        for category in _RISK_RULES
+        if any(category in categories for _, categories in categorized_files)
+    }
     return ToolPayload(
         view=CompareView(
             id=comparison.evidence_id,
@@ -242,11 +271,18 @@ async def _compare(box: "Toolbox", args: CompareArgs) -> ToolPayload:
             untracked_commit_ids=untracked_commit_ids,
             commits=commits,
             files=FileSummaryView(
+                risk_counts={category: len(risky) for category, risky in risky_files.items()},
+                migration_not_added=[
+                    file.filename
+                    for file, categories in categorized_files
+                    if "migration" in categories
+                    and _MIGRATION_SCRIPT.search(file.filename.casefold().replace("\\", "/"))
+                    and file.status.casefold() != "added"
+                ],
+                risky_files=risky_files,
                 file_count=len(files),
                 additions=sum(file.additions for file in files),
                 deletions=sum(file.deletions for file in files),
-                migrations=[file.filename for file in files if _is_migration(file)],
-                production_config=[file.filename for file in files if _is_production_config(file)],
             ),
         ),
         evidence=[
@@ -267,7 +303,7 @@ def build(box: "Toolbox") -> list[BaseTool]:
             name="github_compare",
             description=(
                 "List what changed between two refs (previous release tag -> release branch): every commit with "
-                "the Jira keys it references, plus a summary of changed files with migrations and config flagged."
+                "the Jira keys it references, plus changed files categorized by release risk."
             ),
             args_schema=CompareArgs, access="read", domain="github", budget=2000,
         ),
