@@ -1,0 +1,1457 @@
+{
+  "$defs": {
+    "AppServiceSlot": {
+      "additionalProperties": false,
+      "description": "The production site or a deployment slot. ``release`` comes from the resource's ``release`` tag.",
+      "properties": {
+        "host_name": {
+          "type": "string"
+        },
+        "release": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "site": {
+          "type": "string"
+        },
+        "slot": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "site",
+        "slot",
+        "state",
+        "host_name"
+      ],
+      "type": "object"
+    },
+    "ChangeRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "approval": {
+          "type": "string"
+        },
+        "assignment_group": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "backout_plan": {
+          "default": "",
+          "type": "string"
+        },
+        "close_code": {
+          "default": "",
+          "type": "string"
+        },
+        "close_notes": {
+          "default": "",
+          "type": "string"
+        },
+        "cmdb_ci": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "correlation_id": {
+          "default": "",
+          "type": "string"
+        },
+        "created": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "end_date": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "impact": {
+          "type": "string"
+        },
+        "implementation_plan": {
+          "default": "",
+          "type": "string"
+        },
+        "justification": {
+          "default": "",
+          "type": "string"
+        },
+        "number": {
+          "type": "string"
+        },
+        "risk": {
+          "type": "string"
+        },
+        "short_description": {
+          "type": "string"
+        },
+        "start_date": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "state": {
+          "type": "string"
+        },
+        "sys_id": {
+          "type": "string"
+        },
+        "test_plan": {
+          "default": "",
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "updated": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "sys_id",
+        "number",
+        "short_description",
+        "type",
+        "state",
+        "risk",
+        "impact",
+        "approval"
+      ],
+      "type": "object"
+    },
+    "ChangeSection": {
+      "additionalProperties": false,
+      "description": "Change worker: what changed since production, and whether every change was tracked and reviewed.",
+      "properties": {
+        "commit_reviews": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/CommitReview"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "comparison": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Comparison"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "ChangedFile": {
+      "additionalProperties": false,
+      "properties": {
+        "additions": {
+          "type": "integer"
+        },
+        "deletions": {
+          "type": "integer"
+        },
+        "filename": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "filename",
+        "status",
+        "additions",
+        "deletions"
+      ],
+      "type": "object"
+    },
+    "CheckRun": {
+      "additionalProperties": false,
+      "properties": {
+        "completed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "conclusion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "head_sha": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "status",
+        "head_sha"
+      ],
+      "type": "object"
+    },
+    "CodeScanningAlert": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "number": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "ref": {
+          "type": "string"
+        },
+        "rule_id": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string"
+        },
+        "start_line": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "state",
+        "rule_id",
+        "severity",
+        "description",
+        "tool",
+        "path",
+        "start_line",
+        "ref",
+        "message",
+        "url"
+      ],
+      "type": "object"
+    },
+    "Commit": {
+      "additionalProperties": false,
+      "properties": {
+        "author_login": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "author_name": {
+          "type": "string"
+        },
+        "date": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "files": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ChangedFile"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "message": {
+          "type": "string"
+        },
+        "sha": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha",
+        "message",
+        "author_name",
+        "date",
+        "url"
+      ],
+      "type": "object"
+    },
+    "CommitReview": {
+      "additionalProperties": false,
+      "description": "The pull requests that contain one commit. ``pulls == ()`` means pushed directly, with no review.",
+      "properties": {
+        "commit_id": {
+          "type": "string"
+        },
+        "pulls": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ReviewedPull"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sha": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "commit_id",
+        "sha",
+        "pulls"
+      ],
+      "type": "object"
+    },
+    "Comparison": {
+      "additionalProperties": false,
+      "properties": {
+        "ahead_by": {
+          "type": "integer"
+        },
+        "base": {
+          "type": "string"
+        },
+        "commits": {
+          "items": {
+            "$ref": "#/$defs/Commit"
+          },
+          "type": "array"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/ChangedFile"
+          },
+          "type": "array"
+        },
+        "head": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "total_commits": {
+          "type": "integer"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "base",
+        "head",
+        "status",
+        "ahead_by",
+        "total_commits",
+        "commits",
+        "files",
+        "url"
+      ],
+      "type": "object"
+    },
+    "ConfigurationItem": {
+      "additionalProperties": false,
+      "properties": {
+        "business_criticality": {
+          "default": "",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "owned_by_sys_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "short_description": {
+          "default": "",
+          "type": "string"
+        },
+        "support_group_sys_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sys_id": {
+          "type": "string"
+        },
+        "used_for": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sys_id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "DependencyAlert": {
+      "additionalProperties": false,
+      "properties": {
+        "cve_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cvss_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ecosystem": {
+          "type": "string"
+        },
+        "ghsa_id": {
+          "type": "string"
+        },
+        "manifest_path": {
+          "type": "string"
+        },
+        "number": {
+          "type": "integer"
+        },
+        "package": {
+          "type": "string"
+        },
+        "patched_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "severity": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ],
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "vulnerable_range": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "state",
+        "package",
+        "ecosystem",
+        "manifest_path",
+        "severity",
+        "ghsa_id",
+        "summary",
+        "vulnerable_range",
+        "url"
+      ],
+      "type": "object"
+    },
+    "DeploySection": {
+      "additionalProperties": false,
+      "description": "Deploy worker: what runs where, deployment history and baseline health.",
+      "properties": {
+        "deployments": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Deployment"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "metrics": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/MetricSeries"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "slots": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/AppServiceSlot"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "Deployment": {
+      "additionalProperties": false,
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "author": {
+          "type": "string"
+        },
+        "deployer": {
+          "type": "string"
+        },
+        "ended": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "slot": {
+          "type": "string"
+        },
+        "started": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "building",
+            "deploying",
+            "failed",
+            "success",
+            "unknown"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "slot",
+        "status",
+        "active",
+        "message",
+        "author",
+        "deployer"
+      ],
+      "type": "object"
+    },
+    "EvidenceGap": {
+      "additionalProperties": false,
+      "description": "A piece of evidence that is missing, and why. Gaps are facts too: \"coverage unknown\" must reach the report.",
+      "properties": {
+        "error_type": {
+          "description": "Integration error type, UnexpectedResponse, or Blocked.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "unavailable: the source failed \u00b7 missing: the source has no such data \u00b7 blocked: not attempted because evidence it depends on is missing.",
+          "enum": [
+            "unavailable",
+            "missing",
+            "blocked"
+          ],
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "section": {
+          "description": "Dotted section path, e.g. quality.gate or change.commit_reviews.",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "jira",
+            "github",
+            "sonar",
+            "azure",
+            "servicenow"
+          ],
+          "type": "string"
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The item the gap is about, e.g. gh:commit:1c63f6d."
+        }
+      },
+      "required": [
+        "source",
+        "section",
+        "kind",
+        "error_type",
+        "message"
+      ],
+      "type": "object"
+    },
+    "Issue": {
+      "additionalProperties": false,
+      "properties": {
+        "assignee": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "comments": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/JiraComment"
+          },
+          "type": "array"
+        },
+        "components": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "created": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "description_markdown": {
+          "default": "",
+          "type": "string"
+        },
+        "fix_versions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "issue_type": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "labels": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "priority": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "resolved": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "type": "string"
+        },
+        "status_category": {
+          "enum": [
+            "new",
+            "indeterminate",
+            "done"
+          ],
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "updated": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "summary",
+        "issue_type",
+        "status",
+        "status_category",
+        "created",
+        "updated",
+        "url"
+      ],
+      "type": "object"
+    },
+    "JiraComment": {
+      "additionalProperties": false,
+      "properties": {
+        "author": {
+          "type": "string"
+        },
+        "body_markdown": {
+          "type": "string"
+        },
+        "created": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "author",
+        "body_markdown",
+        "created"
+      ],
+      "type": "object"
+    },
+    "Measures": {
+      "additionalProperties": false,
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "project_key": {
+          "type": "string"
+        },
+        "values": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "project_key",
+        "branch",
+        "values"
+      ],
+      "type": "object"
+    },
+    "MetricPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "timestamp": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "timestamp"
+      ],
+      "type": "object"
+    },
+    "MetricSeries": {
+      "additionalProperties": false,
+      "properties": {
+        "aggregation": {
+          "type": "string"
+        },
+        "interval": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "points": {
+          "items": {
+            "$ref": "#/$defs/MetricPoint"
+          },
+          "type": "array"
+        },
+        "slot": {
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "slot",
+        "unit",
+        "aggregation",
+        "interval",
+        "points"
+      ],
+      "type": "object"
+    },
+    "PullRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "author": {
+          "type": "string"
+        },
+        "base_ref": {
+          "type": "string"
+        },
+        "head_ref": {
+          "type": "string"
+        },
+        "merge_commit_sha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "merged": {
+          "type": "boolean"
+        },
+        "merged_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "number": {
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "title",
+        "state",
+        "merged",
+        "author",
+        "base_ref",
+        "head_ref",
+        "url"
+      ],
+      "type": "object"
+    },
+    "QualityCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "comparator": {
+          "type": "string"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "threshold": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric",
+        "comparator",
+        "threshold",
+        "status"
+      ],
+      "type": "object"
+    },
+    "QualityGate": {
+      "additionalProperties": false,
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "conditions": {
+          "items": {
+            "$ref": "#/$defs/QualityCondition"
+          },
+          "type": "array"
+        },
+        "project_key": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_key",
+        "branch",
+        "status",
+        "conditions"
+      ],
+      "type": "object"
+    },
+    "QualitySection": {
+      "additionalProperties": false,
+      "description": "Quality worker: CI, security alerts and code quality.",
+      "properties": {
+        "checks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/CheckRun"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "code_scanning_alerts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/CodeScanningAlert"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "dependency_alerts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DependencyAlert"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QualityGate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "measures": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Measures"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "previous_measures": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Measures"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "ReleaseIdentity": {
+      "additionalProperties": false,
+      "description": "Which release this is, and the naming conventions that turn it into refs, versions and keys.\n\nThe conventions live here only, so a team with other branch names changes one class, not every worker.",
+      "properties": {
+        "previous_version": {
+          "description": "The release running in production now, e.g. 2.3.1. The diff baseline.",
+          "type": "string"
+        },
+        "service": {
+          "description": "Service name as registered in the CMDB, e.g. payments-api.",
+          "type": "string"
+        },
+        "version": {
+          "description": "The release being prepared, e.g. 2.4.0.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "service",
+        "version",
+        "previous_version"
+      ],
+      "type": "object"
+    },
+    "Review": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "submitted_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "reviewer",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ReviewedPull": {
+      "additionalProperties": false,
+      "properties": {
+        "pull": {
+          "$ref": "#/$defs/PullRequest"
+        },
+        "reviews": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Review"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "pull",
+        "reviews"
+      ],
+      "type": "object"
+    },
+    "ServiceSection": {
+      "additionalProperties": false,
+      "description": "ServiceNow context: how critical the service is, who supports it, and how past changes went.",
+      "properties": {
+        "ci": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConfigurationItem"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "existing_change": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChangeRequest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "recent_changes": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ChangeRequest"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "support_group": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SnowGroup"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "SnowGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "manager_sys_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "type": "string"
+        },
+        "sys_id": {
+          "type": "string"
+        },
+        "type": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sys_id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "TicketSection": {
+      "additionalProperties": false,
+      "description": "Jira worker: release scope and ticket hygiene.",
+      "properties": {
+        "issues": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/Issue"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "All evidence for one release. Deterministic for the same upstream state, except ``collected_at``.",
+  "properties": {
+    "change": {
+      "$ref": "#/$defs/ChangeSection",
+      "default": {
+        "commit_reviews": null,
+        "comparison": null
+      }
+    },
+    "collected_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "deploy": {
+      "$ref": "#/$defs/DeploySection",
+      "default": {
+        "deployments": null,
+        "metrics": null,
+        "slots": null
+      }
+    },
+    "gaps": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/EvidenceGap"
+      },
+      "type": "array"
+    },
+    "identity": {
+      "$ref": "#/$defs/ReleaseIdentity"
+    },
+    "quality": {
+      "$ref": "#/$defs/QualitySection",
+      "default": {
+        "checks": null,
+        "code_scanning_alerts": null,
+        "dependency_alerts": null,
+        "gate": null,
+        "measures": null,
+        "previous_measures": null
+      }
+    },
+    "service": {
+      "$ref": "#/$defs/ServiceSection",
+      "default": {
+        "ci": null,
+        "existing_change": null,
+        "recent_changes": null,
+        "support_group": null
+      }
+    },
+    "tickets": {
+      "$ref": "#/$defs/TicketSection",
+      "default": {
+        "issues": null
+      }
+    }
+  },
+  "required": [
+    "identity",
+    "collected_at"
+  ],
+  "type": "object"
+}

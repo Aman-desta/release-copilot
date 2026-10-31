@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 from langchain_core.tools import BaseTool
 from pydantic import Field
 
+from release_copilot.integrations.models import comment_evidence_id
 from release_copilot.tools.base import Evidence, ToolArgs, ToolPayload, View, make_tool
 
 if TYPE_CHECKING:
@@ -127,10 +128,6 @@ def _strip_footers(body: str) -> str:
     return "\n".join(line for line in body.splitlines() if not _ANY_FOOTER.search(line)).rstrip()
 
 
-def _comment_id(key: str, comment_id: str) -> str:
-    return f"jira:comment:{key}:{comment_id}"
-
-
 async def _release_issues(box: "Toolbox", args: ReleaseIssuesArgs) -> ToolPayload:
     issues = [
         issue
@@ -168,7 +165,7 @@ async def _get_issue(box: "Toolbox", args: IssueKeyArgs) -> ToolPayload:
     issue = await box.jira.get_issue(args.key)
     comments = [
         JiraCommentView(
-            id=_comment_id(issue.key, comment.id),
+            id=comment_evidence_id(issue.key, comment.id),
             author=comment.author,
             created=comment.created.isoformat(),
             body_markdown=_strip_footers(comment.body_markdown),
@@ -209,7 +206,7 @@ async def _add_comment(box: "Toolbox", args: AddCommentArgs) -> ToolPayload:
         comment = await box.jira.add_comment(args.key, f"{_strip_footers(args.text)}\n\n{marker}")
 
     body = _strip_footers(comment.body_markdown)
-    comment_id = _comment_id(issue.key, comment.id)
+    comment_id = comment_evidence_id(issue.key, comment.id)
     return ToolPayload(
         view=AddedCommentView(
             id=comment_id,

@@ -29,6 +29,11 @@ def parse_jira_datetime(value: str | datetime | None) -> datetime | None:
 # ------------------------------------------------------------------------------------------------ Jira
 
 
+def comment_evidence_id(issue_key: str, comment_id: str) -> str:
+    """Comments have no global id in Jira: they are cited through their issue (``jira:comment:PAY-102:10001``)."""
+    return f"jira:comment:{issue_key}:{comment_id}"
+
+
 class JiraComment(_Model):
     id: str
     author: str

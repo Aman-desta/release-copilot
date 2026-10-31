@@ -145,7 +145,7 @@ mocked 404 comes back as a structured error, not an exception.
 
 ## Epic A: Agents and workflow
 
-### A1 [P0, S] Release evidence model
+### A1 [P0, S] Release evidence model — 🔵 In progress
 - `ReleaseEvidence` (Pydantic): release identity, tickets, changes, PRs and reviews, checks, alerts, quality gate,
   deployment state, and a `gaps: list[EvidenceGap]` list for sources that failed or were missing. Every item carries its evidence ID.
 - A deterministic `EvidenceIndex` (id → item) used later by the citation validator and the judge.
@@ -158,6 +158,8 @@ mocked 404 comes back as a structured error, not an exception.
   alerts, Sonar), Deploy (slot state, deployment history, baseline health).
 - Each returns **structured findings** (`with_structured_output`) that reference evidence IDs, plus a summary.
   Iteration and tool-call budgets per worker; when a budget is exhausted the run ends with a gap, not an exception.
+- Write tools get their `idempotency_key` from the graph (`InjectedToolArg`, derived from the run and tool-call ids),
+  never from the model (follow-up from T5, D22).
 - Prebuilt `create_react_agent` for one worker and a custom graph for another; write an ADR comparing them.
 
 **Acceptance:** with the fake model, each worker's trajectory and output are asserted per scenario; a mocked
