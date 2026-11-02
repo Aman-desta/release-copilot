@@ -25,6 +25,8 @@ Required behaviour:
   for equal content, whatever the insertion order (for projections), and changes when any item changes.
 """
 
+import hashlib
+import json
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -44,44 +46,113 @@ class IndexEntry:
 
 
 class EvidenceIndex:
+    def __init__(self) -> None:
+        self._entries: dict[str, IndexEntry] = {}
+        self._conflicts: set[str] = set()
+
     @classmethod
     def from_items(cls, items: Iterable[Any]) -> "EvidenceIndex":
-        raise NotImplementedError("EvidenceIndex: your part of A1")
+        index = cls()
+        for evidence_id, url, item in iter_evidence(list(items)):
+            index._add(IndexEntry(evidence_id, evidence_id.split(":", 1)[0], url, item))
+        return index
 
     @classmethod
     def from_evidence(cls, evidence: ReleaseEvidence) -> "EvidenceIndex":
-        raise NotImplementedError
+        return cls.from_items([evidence])
 
     @classmethod
     def from_artifacts(cls, artifacts: Iterable[ToolArtifact]) -> "EvidenceIndex":
-        raise NotImplementedError
+        index = cls()
+        for artifact in artifacts:
+            if not artifact.ok:
+                continue
+            artifact_index = cls.from_items(artifact.objects)
+            for citation in artifact.evidence:
+                if citation.id not in artifact_index:
+                    raise ValueError(f"artifact {artifact.tool!r} cites evidence it did not return: {citation.id}")
+            for entry in artifact_index:
+                index._add(entry)
+            for citation in artifact.evidence:
+                entry = index._entries[citation.id]
+                if entry.url is None and citation.url is not None:
+                    index._entries[citation.id] = IndexEntry(entry.id, entry.source, citation.url, entry.item)
+        return index
 
     def merge(self, other: "EvidenceIndex") -> "EvidenceIndex":
-        raise NotImplementedError
+        merged = EvidenceIndex()
+        for entry in self:
+            merged._entries[entry.id] = entry
+        merged._conflicts.update(self._conflicts)
+        for entry in other:
+            merged._add(entry)
+        merged._conflicts.update(other._conflicts)
+        return merged
 
     def get(self, evidence_id: str) -> IndexEntry | None:
-        raise NotImplementedError
+        return self._entries.get(evidence_id)
 
     def __contains__(self, evidence_id: object) -> bool:
-        raise NotImplementedError
+        return isinstance(evidence_id, str) and evidence_id in self._entries
 
     def __len__(self) -> int:
-        raise NotImplementedError
+        return len(self._entries)
 
     def __iter__(self) -> Iterator[IndexEntry]:
         """Entries in id order."""
-        raise NotImplementedError
+        return iter(self._entries[evidence_id] for evidence_id in self.ids)
 
     @property
     def ids(self) -> tuple[str, ...]:
-        raise NotImplementedError
+        return tuple(sorted(self._entries))
 
     @property
     def conflicts(self) -> tuple[str, ...]:
-        raise NotImplementedError
+        return tuple(sorted(self._conflicts))
 
     def missing(self, cited: Iterable[str]) -> list[str]:
-        raise NotImplementedError
+        return sorted(set(cited) - self._entries.keys())
 
     def fingerprint(self) -> str:
-        raise NotImplementedError
+        content = {
+            "entries": [
+                {
+                    "id": entry.id,
+                    "url": entry.url,
+                    "item": entry.item.model_dump(mode="json"),
+                }
+                for entry in self
+            ],
+            "conflicts": self.conflicts,
+        }
+        serialized = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    def _add(self, entry: IndexEntry) -> None:
+        current = self._entries.get(entry.id)
+        if current is None:
+            self._entries[entry.id] = entry
+            return
+
+        url = current.url if current.url is not None else entry.url
+        if current.url is None and url is not None:
+            current = IndexEntry(current.id, current.source, url, current.item)
+            self._entries[entry.id] = current
+        if entry.id in self._conflicts:
+            return
+        if _covers(current.item, entry.item):
+            return
+        if _covers(entry.item, current.item):
+            self._entries[entry.id] = IndexEntry(entry.id, entry.source, url, entry.item)
+            return
+
+        self._conflicts.add(entry.id)
+
+
+def _covers(a: BaseModel, b: BaseModel) -> bool:
+    """Whether ``a`` contains every non-default field value present in ``b``."""
+    if type(a) is not type(b):
+        return False
+    a_values = a.model_dump(exclude_defaults=True)
+    b_values = b.model_dump(exclude_defaults=True)
+    return all(name in a_values and a_values[name] == value for name, value in b_values.items())

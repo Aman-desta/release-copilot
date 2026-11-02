@@ -56,3 +56,7 @@ To run only the mocks, without Docker:
 ```bash
 uv run --directory ../release-copilot-mocks python -m release_copilot_mocks --scenario clean
 ```
+
+## License
+
+[MIT](LICENSE)

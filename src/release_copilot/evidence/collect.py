@@ -15,6 +15,8 @@ from collections.abc import Awaitable, Callable, Coroutine
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, TypeVar
 
+from pydantic import ValidationError
+
 from release_copilot.evidence.model import (
     ChangeSection,
     CommitReview,
@@ -28,6 +30,7 @@ from release_copilot.evidence.model import (
     Source,
     TicketSection,
 )
+from release_copilot.integrations.errors import IntegrationError, NotFoundError
 from release_copilot.integrations.models import Commit, PullRequest, Review
 from release_copilot.integrations.servicenow import Q
 
@@ -65,7 +68,33 @@ async def capture(
     - anything else is a bug and must propagate;
     - ``fetch`` is a zero-argument callable, so creating the coroutine happens inside ``capture`` too.
     """
-    raise NotImplementedError("capture: your part of A1")
+    try:
+        return await fetch()
+    except IntegrationError as exc:
+        gaps.append(
+            EvidenceGap(
+                source=source,
+                section=section,
+                subject=subject,
+                kind="missing" if isinstance(exc, NotFoundError) else "unavailable",
+                error_type=type(exc).__name__,
+                message=exc.message,
+                retryable=exc.retryable,
+            )
+        )
+    except (KeyError, ValidationError, TypeError, ValueError) as exc:
+        log.warning("evidence %s.%s: unexpected response shape (%s: %s)", source, section, type(exc).__name__, exc)
+        gaps.append(
+            EvidenceGap(
+                source=source,
+                section=section,
+                subject=subject,
+                kind="unavailable",
+                error_type="UnexpectedResponse",
+                message=f"{source} returned data in an unexpected format; this source is unavailable for now",
+            )
+        )
+    return None
 
 
 # ------------------------------------------------------------------------------------------- collection
