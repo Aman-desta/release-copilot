@@ -21,6 +21,8 @@ dependencies = [
     "langchain-openai>=1.0",
     "openai>=1.50",
     "numpy>=2.4.6",
+    "langgraph>=1.2.19",
+    "langchain>=1.4.8",
 ]
 
 [tool.setuptools.packages.find]

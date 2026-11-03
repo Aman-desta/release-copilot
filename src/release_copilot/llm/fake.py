@@ -30,7 +30,6 @@ class FakeChatModel(BaseChatModel):
     responses: list[AIMessage | str] = Field(default_factory=lambda: ["ok"])
     calls: list[list[BaseMessage]] = Field(default_factory=list)  # every prompt received, for assertions
     bound_tools: list[dict[str, Any]] = Field(default_factory=list)
-    cursor: int = 0
 
     @property
     def _llm_type(self) -> str:
@@ -42,13 +41,14 @@ class FakeChatModel(BaseChatModel):
 
     def bind_tools(self, tools: Sequence[dict[str, Any] | type | BaseTool | Any], **kwargs: Any) -> "FakeChatModel":  # type: ignore[override]
         clone = self.model_copy(update={"bound_tools": [convert_to_openai_tool(t) for t in tools]})
-        # The clone shares the script position and call log with the original, like one model behind many bindings.
+        # The clone shares the call log with the original, and the script position is derived from it, so every
+        # binding reads one script, like one model behind many bindings. (Agents re-bind tools on every turn.)
         clone.calls = self.calls
         return clone
 
     def _next(self) -> AIMessage:
-        reply = self.responses[min(self.cursor, len(self.responses) - 1)]
-        self.cursor += 1
+        position = len(self.calls) - 1  # this call is already logged
+        reply = self.responses[min(position, len(self.responses) - 1)]
         return reply.model_copy(deep=True) if isinstance(reply, AIMessage) else AIMessage(content=reply)
 
     def _generate(

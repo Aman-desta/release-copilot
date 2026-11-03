@@ -719,15 +719,16 @@
       "description": "A piece of evidence that is missing, and why. Gaps are facts too: \"coverage unknown\" must reach the report.",
       "properties": {
         "error_type": {
-          "description": "Integration error type, UnexpectedResponse, or Blocked.",
+          "description": "Integration error type, UnexpectedResponse, Blocked, BudgetExhausted or InvalidOutput.",
           "type": "string"
         },
         "kind": {
-          "description": "unavailable: the source failed \u00b7 missing: the source has no such data \u00b7 blocked: not attempted because evidence it depends on is missing.",
+          "description": "unavailable: the source failed \u00b7 missing: the source has no such data \u00b7 blocked: not attempted because evidence it depends on is missing \u00b7 exhausted: a worker ran out of its model-call or tool-call budget, so its evidence may be incomplete.",
           "enum": [
             "unavailable",
             "missing",
-            "blocked"
+            "blocked",
+            "exhausted"
           ],
           "type": "string"
         },
@@ -748,7 +749,8 @@
             "github",
             "sonar",
             "azure",
-            "servicenow"
+            "servicenow",
+            "agent"
           ],
           "type": "string"
         },

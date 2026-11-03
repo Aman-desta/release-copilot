@@ -12,7 +12,9 @@ Every tool built with ``make_tool``:
   reason about. An unexpected vendor shape (``KeyError``, validation errors) becomes ``UnexpectedResponse``.
   Programming errors still raise: bugs must stay visible;
 - carries metadata: ``access`` (``read`` | ``write``) and ``domain`` (``jira``, ``github``, ...). Write tools must
-  take an ``idempotency_key`` argument; ``make_tool`` refuses to build one that doesn't.
+  take an ``idempotency_key`` argument marked ``InjectedToolArg``; ``make_tool`` refuses to build one that doesn't.
+  The model never sees or chooses the key: the graph injects it (``idempotency_key()``), derived from the run and the
+  tool call's id, so a replayed tool call (a retry, or a resume from a checkpoint) reuses the same key (D22).
 """
 
 import json
@@ -174,6 +176,23 @@ def _validation_message(exc: Any) -> str:
     return _dump({"ok": False, "error": _error("InvalidArguments", str(exc))})
 
 
+def tool_error(error_type: str, message: str, *, retryable: bool = False) -> str:
+    """Tool-message content for a call that never reached the tool (unknown tool, budget exhausted...)."""
+    return _dump({"ok": False, "error": _error(error_type, message, retryable=retryable)})
+
+
+IDEMPOTENCY_ARG = "idempotency_key"
+
+
+def is_write_tool(tool: BaseTool) -> bool:
+    return (tool.metadata or {}).get("access") == "write"
+
+
+def idempotency_key(run_id: str, tool_call_id: str) -> str:
+    """The key a write tool call gets from the graph: stable across replays of the same tool call."""
+    return f"{run_id}:{tool_call_id}"
+
+
 def make_tool(
     fn: Callable[[Any], Awaitable[ToolPayload]],
     *,
@@ -185,7 +204,7 @@ def make_tool(
     budget: int = DEFAULT_BUDGET,
 ) -> BaseTool:
     """Wrap ``fn(args) -> ToolPayload`` as a LangChain tool (see the module docstring for the behaviour)."""
-    if access == "write" and "idempotency_key" not in args_schema.model_fields:
+    if access == "write" and IDEMPOTENCY_ARG not in args_schema.model_fields:
         raise ValueError(f"write tool {name!r} must take an idempotency_key argument")
 
     async def run(**kwargs: Any) -> tuple[str, ToolArtifact]:
@@ -214,7 +233,7 @@ def make_tool(
         )
         return content, artifact
 
-    return StructuredTool.from_function(
+    tool = StructuredTool.from_function(
         coroutine=run,
         name=name,
         description=description,
@@ -224,3 +243,6 @@ def make_tool(
         metadata={"access": access, "domain": domain, "budget": budget},
         tags=[f"access:{access}", f"domain:{domain}"],
     )
+    if access == "write" and IDEMPOTENCY_ARG in tool.tool_call_schema.model_fields:
+        raise ValueError(f"write tool {name!r}: idempotency_key must be Annotated[str, InjectedToolArg], not chosen by the model")
+    return tool

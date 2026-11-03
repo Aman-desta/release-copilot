@@ -95,6 +95,13 @@ def test_write_tools_must_take_an_idempotency_key():
     with pytest.raises(ValueError, match="idempotency_key"):
         make_tool(fn, name="post", description="d", args_schema=Args, access="write", domain="jira")
 
+    class ModelChosenKey(ToolArgs):  # visible to the model, so the model could choose (or reuse) a key
+        text: str
+        idempotency_key: str
+
+    with pytest.raises(ValueError, match="InjectedToolArg"):
+        make_tool(fn, name="post", description="d", args_schema=ModelChosenKey, access="write", domain="jira")
+
 
 async def test_invalid_arguments_come_back_as_a_structured_error(box):
     tool = by_name(github.build(box), "github_commit_pull_requests")

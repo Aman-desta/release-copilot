@@ -230,7 +230,8 @@ widened deliberately, with a test, when a real case appears.
 
 **What.**
 - `Toolbox.tools()` returns **read** tools unless the caller explicitly asks for `access={"read", "write"}`.
-- A write tool must take an `idempotency_key`. `make_tool` refuses to build one that doesn't.
+- A write tool must take an `idempotency_key` marked `InjectedToolArg`, so the model never sees it (D22).
+  `make_tool` refuses to build one that doesn't.
 - Creating change requests, requesting approvals and swapping slots are **not tools at all**. They are
   deterministic workflow steps behind human approval (A6–A8).
 - The only model-callable write today is `jira_add_comment`: low impact, reversible, and visible to humans.
@@ -262,6 +263,15 @@ point for a bank release.
 - Rich text in ADF has no hidden comments, so an HTML comment would show up as literal text anyway. A short,
   honest footer is also a useful audit trail.
 - A footer copied from another comment would make *that* key's next post look done, and skip it silently.
+
+**Who chooses the key (A2).** The graph, never the model. `idempotency_key` is `Annotated[str, InjectedToolArg]`,
+so it's absent from the schema the model sees. The tool executor (`agents/custom.py`) sets it to
+`"{run_id}:{tool_call_id}"`, overwriting anything the model sent:
+- a **replay** of the same tool call (a retry, or a resume from a checkpoint that re-runs the tools node) has the same
+  run and tool-call ids, so it gets the same key and finds its own footer;
+- a model-chosen key would change between attempts (defeating deduplication), or repeat across releases
+  (suppressing a real comment);
+- a run without a `run_id` raises before any write runs, rather than writing with a made-up key.
 
 **Trade-off.** Check-then-post isn't atomic: two **concurrent** calls with the same key can both post. An
 `asyncio.Lock` would only cover one process. Real exactly-once needs server-side support, so the guarantee is
@@ -370,7 +380,8 @@ that can't be cited. Each test pins one of those down.
 
 | Item | Why it's acceptable for now | Where it gets addressed |
 |---|---|---|
-| The model chooses `idempotency_key`, so a retry with a fresh key defeats deduplication | Only one low-risk write tool exists | A1: the graph injects the key (`InjectedToolArg`), derived from the run and tool-call ids |
+| ~~The model chooses `idempotency_key`~~ | | **Done in A2**: the graph injects it (`InjectedToolArg`), see D22 |
+| The prebuilt worker can't inject keys (its tool node doesn't fill `InjectedToolArg`) | No worker has a write tool | A `wrap_tool_call` middleware, if a prebuilt worker ever needs to write |
 | Concurrent `jira_add_comment` calls with the same key can both post | Needs server support; rare in one run | Documented (D22); serialize writes per issue in the graph if needed |
 | Personal data in fetched text (descriptions, comments) reaches the model and the artifact | Minimized (D23), not yet redacted | G1: a sanitizer stage inside `make_tool`, over content and artifact |
 | Tool content is untrusted input (instructions hidden in tickets or commits) | Read-only tools and the absence of high-risk tools limit the damage | G1: injection detection, plus G2 action guardrails |

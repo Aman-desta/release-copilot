@@ -36,8 +36,9 @@ from release_copilot.integrations.models import (
     comment_evidence_id,
 )
 
-Source = Literal["jira", "github", "sonar", "azure", "servicenow"]
-GapKind = Literal["unavailable", "missing", "blocked"]
+# "agent": the gap comes from the copilot itself (a worker ran out of budget, or its answer was invalid), not a system.
+Source = Literal["jira", "github", "sonar", "azure", "servicenow", "agent"]
+GapKind = Literal["unavailable", "missing", "blocked", "exhausted"]
 
 _VERSION = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 _SERVICE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -107,9 +108,10 @@ class EvidenceGap(_Frozen):
     subject: str | None = Field(default=None, description="The item the gap is about, e.g. gh:commit:1c63f6d.")
     kind: GapKind = Field(
         description="unavailable: the source failed · missing: the source has no such data · "
-        "blocked: not attempted because evidence it depends on is missing."
+        "blocked: not attempted because evidence it depends on is missing · "
+        "exhausted: a worker ran out of its model-call or tool-call budget, so its evidence may be incomplete."
     )
-    error_type: str = Field(description="Integration error type, UnexpectedResponse, or Blocked.")
+    error_type: str = Field(description="Integration error type, UnexpectedResponse, Blocked, BudgetExhausted or InvalidOutput.")
     message: str
     retryable: bool = False
 

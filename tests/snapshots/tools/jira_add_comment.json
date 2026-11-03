@@ -1,15 +1,9 @@
 {
   "function": {
-    "description": "Add a Markdown comment to a Jira issue with a short visible audit reference. Reusing the same idempotency key will not add another comment.",
+    "description": "Add a Markdown comment to a Jira issue with a short visible audit reference. Safe to retry: repeating the same call does not add a second comment.",
     "name": "jira_add_comment",
     "parameters": {
       "properties": {
-        "idempotency_key": {
-          "description": "Stable key to prevent duplicate comments.",
-          "maxLength": 256,
-          "minLength": 1,
-          "type": "string"
-        },
         "key": {
           "description": "Jira issue key, e.g. \"PAY-102\".",
           "maxLength": 64,
@@ -26,8 +20,7 @@
       },
       "required": [
         "key",
-        "text",
-        "idempotency_key"
+        "text"
       ],
       "type": "object"
     }

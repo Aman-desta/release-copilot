@@ -19,9 +19,9 @@ argument schema, and quote the JQL value (JQL injection is the Jira version of w
 
 import hashlib
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, InjectedToolArg
 from pydantic import Field
 
 from release_copilot.integrations.models import comment_evidence_id
@@ -51,7 +51,8 @@ class IssueKeyArgs(ToolArgs):
 
 class AddCommentArgs(IssueKeyArgs):
     text: str = Field(min_length=1, max_length=32000, description="Markdown comment to add to the issue.")
-    idempotency_key: str = Field(min_length=1, max_length=256, description="Stable key to prevent duplicate comments.")
+    # Injected by the graph (D22): hidden from the model, which can neither see nor choose it.
+    idempotency_key: Annotated[str, InjectedToolArg] = Field(min_length=1, max_length=256)
 
 
 class ReleaseIssueView(View):
@@ -249,7 +250,7 @@ def build(box: "Toolbox") -> list[BaseTool]:
             name="jira_add_comment",
             description=(
                 "Add a Markdown comment to a Jira issue with a short visible audit reference. "
-                "Reusing the same idempotency key will not add another comment."
+                "Safe to retry: repeating the same call does not add a second comment."
             ),
             args_schema=AddCommentArgs,
             access="write",

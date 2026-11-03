@@ -152,7 +152,7 @@ mocked 404 comes back as a structured error, not an exception.
 
 **Acceptance:** built by hand from the mocks for every scenario; the JSON schema is exported for prompts.
 
-### A2 [P0, M] Evidence worker agents
+### A2 [P0, M] Evidence worker agents — 🔵 In progress
 - Four workers, each a compiled subgraph with its **own state schema** and **only its own tools**:
   Jira (scope and ticket hygiene), Change (diff, PR and review coverage, untracked commits), Quality (checks,
   alerts, Sonar), Deploy (slot state, deployment history, baseline health).
