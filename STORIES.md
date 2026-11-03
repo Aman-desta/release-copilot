@@ -16,8 +16,8 @@ Each story's status goes at the end of its `###` heading line: *(none)* = open �
 
 | Status | Stories |
 |---|---|
-| Done | F1, F2, F3, T1, T2, T3, T4, T5 |
-| Next up | A1 |
+| Done | F1, F2, F3, T1, T2, T3, T4, T5, A1 |
+| Next up | A2 |
 
 **Suggested order:** F2, F3, T1, T2, T3, T4, T5 → A1, A2, A3 (first end-to-end run) → O1 (trace everything from here on) →
 A4, A5, P1, A6, A7, A8 → P2, P3 → G1, G2 → O2, O3, O4 → M1, M2 → S1, S2, S3 → X1, X2.
@@ -145,7 +145,7 @@ mocked 404 comes back as a structured error, not an exception.
 
 ## Epic A: Agents and workflow
 
-### A1 [P0, S] Release evidence model — 🔵 In progress
+### A1 [P0, S] Release evidence model — ✅ Done
 - `ReleaseEvidence` (Pydantic): release identity, tickets, changes, PRs and reviews, checks, alerts, quality gate,
   deployment state, and a `gaps: list[EvidenceGap]` list for sources that failed or were missing. Every item carries its evidence ID.
 - A deterministic `EvidenceIndex` (id → item) used later by the citation validator and the judge.

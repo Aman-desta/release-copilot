@@ -287,6 +287,14 @@ async def test_from_artifacts_skips_failures_and_rejects_uncited_ids(clean_evide
         EvidenceIndex.from_artifacts([bogus])
 
 
+def test_from_artifacts_keeps_a_conflict_inside_one_artifact():
+    first = Measures(project_key="payments-api", branch="release/2.4.0", values={"coverage": 84.2})
+    later = Measures(project_key="payments-api", branch="release/2.4.0", values={"coverage": 76.1})
+    artifact = ToolArtifact(tool="sonar_quality", ok=True, evidence=[Evidence(first.evidence_id)], objects=[first, later])
+    index = EvidenceIndex.from_artifacts([artifact])
+    assert index.conflicts == (first.evidence_id,) and index.get(first.evidence_id).item == first
+
+
 async def test_fingerprint_is_deterministic_and_content_sensitive(mock_env):
     def without_metrics(ev: ReleaseEvidence) -> ReleaseEvidence:  # metrics depend on the minute they're read
         return ev.model_copy(update={"deploy": ev.deploy.model_copy(update={"metrics": None})})

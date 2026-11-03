@@ -73,6 +73,9 @@ class EvidenceIndex:
                     raise ValueError(f"artifact {artifact.tool!r} cites evidence it did not return: {citation.id}")
             for entry in artifact_index:
                 index._add(entry)
+            # The entries above are only the ones artifact_index kept: a conflict found inside this one artifact
+            # lives in its _conflicts, and would be lost without this.
+            index._conflicts |= artifact_index._conflicts
             for citation in artifact.evidence:
                 entry = index._entries[citation.id]
                 if entry.url is None and citation.url is not None:
