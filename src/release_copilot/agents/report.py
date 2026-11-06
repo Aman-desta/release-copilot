@@ -4,13 +4,14 @@ Shared by both worker implementations (custom graph and prebuilt agent), so the 
 """
 
 from collections.abc import Sequence
+from typing import Any, cast, get_args
 
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
 
 from release_copilot.agents.findings import Budget, WorkerOutput, WorkerReport
 from release_copilot.agents.workers import WorkerSpec
 from release_copilot.evidence.index import EvidenceIndex
-from release_copilot.evidence.model import EvidenceGap
+from release_copilot.evidence.model import EvidenceGap, Source
 from release_copilot.tools.base import ToolArtifact
 
 
@@ -32,7 +33,46 @@ def tool_gaps(worker: str, messages: Sequence[AnyMessage]) -> list[EvidenceGap]:
       replaces the earlier one (the newest error is what's true now).
     - Gaps are returned in the order their call first failed.
     """
-    raise NotImplementedError("tool_gaps: your part of A2")
+    calls: dict[str, tuple[str, dict[str, Any]]] = {}
+    gaps: dict[tuple[str, str | None], EvidenceGap] = {}
+
+    for message in messages:
+        if isinstance(message, AIMessage):
+            for call in message.tool_calls:
+                if call["id"] is not None:
+                    calls[call["id"]] = (call["name"], call["args"])
+            continue
+
+        if not isinstance(message, ToolMessage) or not isinstance(message.artifact, ToolArtifact):
+            continue
+
+        artifact = message.artifact
+        call = calls.get(message.tool_call_id)
+        if call is None:
+            raise ValueError(f"tool message {message.tool_call_id} has no matching AIMessage tool call")
+        args = call[1]
+        tool = artifact.tool
+        subject = ", ".join(f"{name}={value}" for name, value in sorted(args.items())) or None
+        key = (tool, subject)
+        if artifact.ok:
+            gaps.pop(key, None)
+            continue
+
+        error = artifact.error
+        if error is None:
+            raise ValueError(f"failed tool artifact for {tool} has no error details")
+
+        gaps[key] = EvidenceGap(
+            source=_source(tool),
+            section=f"{worker}.{tool}",
+            subject=subject,
+            kind="missing" if error["error_type"] == "NotFoundError" else "unavailable",
+            error_type=error["error_type"],
+            message=error["message"],
+            retryable=error["retryable"],
+        )
+
+    return list(gaps.values())
 
 
 def build_report(
@@ -80,3 +120,8 @@ def requested_tool_calls(messages: Sequence[AnyMessage], tools: Sequence[str]) -
     """How many calls to the worker's own tools the model asked for (structured-answer calls don't count)."""
     return sum(1 for m in messages if isinstance(m, AIMessage) for c in m.tool_calls if c["name"] in tools)
 
+def _source(tool: str) -> Source:
+   prefix = tool.split("_", maxsplit=1)[0]
+   if prefix not in get_args(Source):
+       raise ValueError(f"tool {tool} has unknown source prefix {prefix}")
+   return cast(Source, prefix)

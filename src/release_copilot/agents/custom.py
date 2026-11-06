@@ -12,24 +12,42 @@ Compared with the prebuilt agent (``prebuilt.py``), every rule is code we can re
 - write tools get their idempotency key from the graph (D22).
 """
 
-import asyncio  # noqa: F401  (for your implementation)
+import asyncio
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Literal, TypedDict, cast
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolCall,
+    ToolMessage,
+)
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 
-from release_copilot.agents.findings import Budget, WorkerInput, WorkerOutput, WorkerReport, WorkerResult
+from release_copilot.agents.findings import (
+    Budget,
+    WorkerInput,
+    WorkerOutput,
+    WorkerReport,
+    WorkerResult,
+)
 from release_copilot.agents.report import build_report
 from release_copilot.agents.workers import FINAL_INSTRUCTION, WorkerSpec, release_brief
 from release_copilot.evidence.model import ReleaseIdentity
-from release_copilot.tools.base import IDEMPOTENCY_ARG, idempotency_key, is_write_tool, tool_error  # noqa: F401  (for your implementation)
+from release_copilot.tools.base import (
+    IDEMPOTENCY_ARG,
+    idempotency_key,
+    is_write_tool,
+    tool_error,
+)
 
 
 class CustomWorkerState(TypedDict):
@@ -76,7 +94,74 @@ async def execute_tool_calls(
       before running any call.
     - Don't modify ``ai`` (it's already in the graph state): copy each call before changing it.
     """
-    raise NotImplementedError("execute_tool_calls: your part of A2")
+    calls = ai.tool_calls
+    allowed = max(0, remaining)
+
+    executable = calls[:allowed]
+    refused = calls[allowed:]
+
+    prepared_calls: list[ToolCall] = []
+    for call in executable:
+        copied_call = call.copy()
+        tool = tools.get(copied_call["name"])
+        args = copied_call.get("args", {}).copy()
+
+        if tool is not None and is_write_tool(tool):
+            if not run_id:
+                raise ValueError("run_id is required for write tools")
+            call_id = copied_call["id"]
+            if call_id is None:
+                raise ValueError("tool_call_id is required for write tools")
+            args[IDEMPOTENCY_ARG] = idempotency_key(run_id, call_id)
+
+        copied_call["args"] = args
+        prepared_calls.append(copied_call)
+
+    async def execute_one(call: ToolCall) -> ToolMessage:
+        copied_call = call.copy()
+        name = copied_call["name"]
+        call_id = copied_call["id"]
+
+        tool = tools.get(call["name"])
+
+        if tool is None:
+            return ToolMessage(
+                content=tool_error("UnknownTool", f"Tool call refused: unknown tool {name}"),
+                name=name,
+                tool_call_id=call_id,
+                status="error",
+            )
+
+
+
+        result =  await tool.ainvoke({**call, "type": "tool_call"}, config)
+        return result
+
+    async  with asyncio.TaskGroup() as tg:
+        tasks = [
+            tg.create_task(execute_one(call)) for call in prepared_calls
+        ]
+
+    messages = [
+        task.result() for task in tasks
+    ]
+
+    # Every refused call still needs a response
+    for call in refused:
+        messages.append(
+            ToolMessage(
+                content=tool_error("BudgetExhausted", f"Tool call refused due to budget exhaustion: {call['name']}"),
+                name=call["name"],
+                tool_call_id=call["id"],
+                status="error",
+            )
+        )
+
+    return ToolBatch(
+        messages=messages,
+        executed=len(executable),
+        exhausted=bool(refused),
+    )
 
 
 # ----------------------------------------------------------------------------------------------- graph
@@ -118,7 +203,8 @@ def build_custom_worker(spec: WorkerSpec, tools: Sequence[BaseTool], model: Base
         return update
 
     async def respond(state: CustomWorkerState, config: RunnableConfig) -> dict:
-        result = await answer.ainvoke([*state["messages"], HumanMessage(FINAL_INSTRUCTION)], config)
+        # include_raw=True returns {"raw", "parsed", "parsing_error"}; the declared type is dict | BaseModel.
+        result = cast(dict, await answer.ainvoke([*state["messages"], HumanMessage(FINAL_INSTRUCTION)], config))
         return {"output": None if result["parsing_error"] else result["parsed"], "model_calls": state["model_calls"] + 1}
 
     async def report(state: CustomWorkerState) -> dict:

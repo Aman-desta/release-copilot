@@ -11,10 +11,13 @@ What the prebuilt agent gives us, and what it costs (docs/adr/0001-worker-graphs
 """
 
 from collections.abc import Sequence
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from langchain.agents import create_agent
-from langchain.agents.middleware import ModelCallLimitMiddleware, ToolCallLimitMiddleware
+from langchain.agents.middleware import (
+    ModelCallLimitMiddleware,
+    ToolCallLimitMiddleware,
+)
 from langchain.agents.structured_output import ToolStrategy
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
@@ -23,7 +26,13 @@ from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from release_copilot.agents.findings import Budget, WorkerInput, WorkerOutput, WorkerReport, WorkerResult
+from release_copilot.agents.findings import (
+    Budget,
+    WorkerInput,
+    WorkerOutput,
+    WorkerReport,
+    WorkerResult,
+)
 from release_copilot.agents.report import build_report, requested_tool_calls
 from release_copilot.agents.workers import WorkerSpec, release_brief
 from release_copilot.evidence.model import ReleaseIdentity
@@ -42,15 +51,17 @@ def build_prebuilt_worker(spec: WorkerSpec, tools: Sequence[BaseTool], model: Ba
     if any(is_write_tool(t) for t in tools):
         raise ValueError(f"{spec.name}: the prebuilt worker can't inject idempotency keys, so it can't have write tools")
     answer_calls = spec.max_model_calls + 1  # the loop's calls plus the final answer, as in the custom graph
+    # list[Any]: each middleware declares its own state type, and create_agent's overloads want them all to match.
+    middleware: list[Any] = [
+        ModelCallLimitMiddleware(run_limit=answer_calls, exit_behavior="end"),
+        # "continue": calls over the budget are refused with an error message and the model can still answer.
+        ToolCallLimitMiddleware(run_limit=spec.max_tool_calls, exit_behavior="continue"),
+    ]
     agent = create_agent(
         model,
         list(tools),
         system_prompt=spec.prompt,
-        middleware=[
-            ModelCallLimitMiddleware(run_limit=answer_calls, exit_behavior="end"),
-            # "continue": calls over the budget are refused with an error message and the model can still answer.
-            ToolCallLimitMiddleware(run_limit=spec.max_tool_calls, exit_behavior="continue"),
-        ],
+        middleware=middleware,
         response_format=ToolStrategy(WorkerOutput),
         name=f"{spec.name}_agent",
     ).with_config(recursion_limit=STEPS_PER_MODEL_CALL * answer_calls)

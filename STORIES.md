@@ -16,8 +16,8 @@ Each story's status goes at the end of its `###` heading line: *(none)* = open �
 
 | Status | Stories |
 |---|---|
-| Done | F1, F2, F3, T1, T2, T3, T4, T5, A1 |
-| Next up | A2 |
+| Done | F1, F2, F3, T1, T2, T3, T4, T5, A1, A2 |
+| Next up | A3 |
 
 **Suggested order:** F2, F3, T1, T2, T3, T4, T5 → A1, A2, A3 (first end-to-end run) → O1 (trace everything from here on) →
 A4, A5, P1, A6, A7, A8 → P2, P3 → G1, G2 → O2, O3, O4 → M1, M2 → S1, S2, S3 → X1, X2.
@@ -152,7 +152,7 @@ mocked 404 comes back as a structured error, not an exception.
 
 **Acceptance:** built by hand from the mocks for every scenario; the JSON schema is exported for prompts.
 
-### A2 [P0, M] Evidence worker agents — 🔵 In progress
+### A2 [P0, M] Evidence worker agents — ✅ Done
 - Four workers, each a compiled subgraph with its **own state schema** and **only its own tools**:
   Jira (scope and ticket hygiene), Change (diff, PR and review coverage, untracked commits), Quality (checks,
   alerts, Sonar), Deploy (slot state, deployment history, baseline health).
