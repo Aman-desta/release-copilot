@@ -16,8 +16,8 @@ Each story's status goes at the end of its `###` heading line: *(none)* = open �
 
 | Status | Stories |
 |---|---|
-| Done | F1, F2, F3, T1, T2, T3, T4, T5, A1, A2 |
-| Next up | A3 |
+| Done | F1, F2, F3, T1, T2, T3, T4, T5, A1, A2, A3 |
+| Next up | O1 |
 
 **Suggested order:** F2, F3, T1, T2, T3, T4, T5 → A1, A2, A3 (first end-to-end run) → O1 (trace everything from here on) →
 A4, A5, P1, A6, A7, A8 → P2, P3 → G1, G2 → O2, O3, O4 → M1, M2 → S1, S2, S3 → X1, X2.
@@ -165,7 +165,7 @@ mocked 404 comes back as a structured error, not an exception.
 **Acceptance:** with the fake model, each worker's trajectory and output are asserted per scenario; a mocked
 outage of one service produces a recorded gap, not a failed run.
 
-### A3 [P0, L] Supervisor orchestration
+### A3 [P0, L] Supervisor orchestration — ✅ Done
 - A supervisor graph that plans which workers to run, **fans out in parallel with `Send`**, merges findings
   through reducers, and decides on follow-up (for example "Quality found a CVE, so ask Change who touched that file").
 - Handoffs with `Command(goto=..., update=...)`; `recursion_limit` and a global token and cost budget; a

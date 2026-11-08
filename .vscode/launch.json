@@ -2,11 +2,11 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug tests/test_evidence.py",
+      "name": "Debug tests/test_supervisor.py",
       "type": "debugpy",
       "request": "launch",
       "module": "pytest",
-      "args": ["tests/test_evidence.py"],
+      "args": ["tests/test_supervisor.py"],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "justMyCode": false

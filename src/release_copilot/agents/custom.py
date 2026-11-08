@@ -40,7 +40,7 @@ from release_copilot.agents.findings import (
     WorkerResult,
 )
 from release_copilot.agents.report import build_report
-from release_copilot.agents.workers import FINAL_INSTRUCTION, WorkerSpec, release_brief
+from release_copilot.agents.workers import FINAL_INSTRUCTION, WorkerSpec, task_brief
 from release_copilot.evidence.model import ReleaseIdentity
 from release_copilot.tools.base import (
     IDEMPOTENCY_ARG,
@@ -52,6 +52,8 @@ from release_copilot.tools.base import (
 
 class CustomWorkerState(TypedDict):
     identity: ReleaseIdentity
+    question: str | None
+    about: tuple[str, ...]
     messages: Annotated[list[AnyMessage], add_messages]
     model_calls: int
     tool_calls: int
@@ -174,7 +176,7 @@ def build_custom_worker(spec: WorkerSpec, tools: Sequence[BaseTool], model: Base
 
     async def start(state: CustomWorkerState) -> dict:
         return {
-            "messages": [SystemMessage(spec.prompt), HumanMessage(release_brief(state["identity"]))],
+            "messages": [SystemMessage(spec.prompt), HumanMessage(task_brief(state))],
             "model_calls": 0,
             "tool_calls": 0,
             "exhausted": None,
@@ -234,4 +236,7 @@ def build_custom_worker(spec: WorkerSpec, tools: Sequence[BaseTool], model: Base
     graph.add_conditional_edges("tools", after_tools)
     graph.add_edge("respond", "report")
     graph.add_edge("report", END)
-    return graph.compile(name=f"{spec.name}_worker")
+    # No checkpoints of its own (checkpointer=False): a worker is read-only, so a resumed run simply reruns it, and
+    # its raw tool output (which can hold personal data) never reaches the checkpoint store.
+    return graph.compile(name=f"{spec.name}_worker", checkpointer=False)
+

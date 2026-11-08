@@ -8,7 +8,7 @@ Two models on purpose:
   worker actually collected ("facts in code, judgment in model").
 """
 
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -73,6 +73,8 @@ class WorkerInput(TypedDict):
     """What a worker subgraph takes from its caller. Everything else in its state is private (context isolation)."""
 
     identity: ReleaseIdentity
+    question: NotRequired[str | None]  # a supervisor follow-up (A3); None or absent: the worker's own review
+    about: NotRequired[tuple[str, ...]]  # the evidence ids the follow-up is about
 
 
 class WorkerResult(TypedDict):

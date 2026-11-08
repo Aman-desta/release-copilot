@@ -27,7 +27,8 @@ def _tokens(text: str) -> int:
 
 class FakeChatModel(BaseChatModel):
     model_name: str = "fake-model"
-    responses: list[AIMessage | str] = Field(default_factory=lambda: ["ok"])
+    # str first: AIMessage's validator crashes on a plain string instead of rejecting it, which breaks the union.
+    responses: list[str | AIMessage] = Field(default_factory=lambda: ["ok"])
     calls: list[list[BaseMessage]] = Field(default_factory=list)  # every prompt received, for assertions
     bound_tools: list[dict[str, Any]] = Field(default_factory=list)
 

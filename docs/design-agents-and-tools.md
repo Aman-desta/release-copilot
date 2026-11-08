@@ -1,7 +1,8 @@
 # Release Copilot: Agents and Tools, High-Level Design
 
-**Status:** current as of T5 (Oct 2026) · **Scope:** the agent tool layer (T5). Agents, the supervisor and the
-workflow (A\*) are added here as they are built. The layer underneath (settings, model gateway, typed clients)
+**Status:** current as of A3 (Nov 2026) · **Scope:** the agent tool layer (T5), the evidence workers (A2) and
+the supervisor (A3). The rest of the workflow (A\*) is added here as it is built. Architecture choices are in
+[docs/adr](adr/). The layer underneath (settings, model gateway, typed clients)
 is in [design-foundations-and-integrations.md](design-foundations-and-integrations.md). Decision numbers continue
 from that doc.
 
@@ -91,6 +92,8 @@ sequenceDiagram
 | **T5** Toolbox | Client ownership, filtering by domain and access, read-only default, duplicate-name check | `tools/toolbox.py` |
 | **T5** Tools | 11 tools over Jira, GitHub, SonarQube, Azure and ServiceNow (catalog below) | `tools/*.py` |
 | **T5** Tests | Behaviour tests per tool, framework tests, citation checks, schema snapshots | `tests/test_tools.py`, `tests/snapshots/tools/` |
+| **A2** Evidence workers | Four workers with scoped read-only tools and budgets; a custom graph and the prebuilt agent ([ADR 0001](adr/0001-worker-graphs.md)) | `agents/workers.py`, `custom.py`, `prebuilt.py`, `report.py` |
+| **A3** Supervisor | Deterministic collection, parallel workers with `Send`, validated follow-ups, global budget, partial-evidence policy ([ADR 0002](adr/0002-supervisor-orchestration.md)) | `agents/supervisor.py`, `followups.py`, `policy.py`, `budget.py`, `run.py` |
 
 The whole repo has about 225 automated tests (54 for the tool layer), all running without network access or a
 real LLM.
@@ -374,6 +377,67 @@ behaviour tests instead.
 **Why it matters.** Tool failures in production are usually silent: a cut item, a misleading flag, an id
 that can't be cited. Each test pins one of those down.
 
+### D28. The supervisor: code plans, models judge (A3)
+
+**What.** The facts come from the deterministic collector (A1), and code decides which workers run: all four,
+except a worker whose every evidence section is unknown, which is skipped with a `blocked` gap. A model is used
+for one decision only: after the first round, and only if a finding is high or critical, it proposes follow-ups.
+Code accepts a proposal only if it's about collected evidence, for a worker that ran, at most one per worker and
+two per run, in one round. See [ADR 0002](adr/0002-supervisor-orchestration.md) for the alternatives.
+
+**Why it matters.** A release review always needs the same reviews, so a model choosing them only adds a way to
+skip one. Bounding follow-ups in code means a prompt injection can't create an unbounded or invented chain of work.
+
+### D29. The partial-evidence policy
+
+**What.** `agents/policy.py` classifies each of the 16 evidence sections as **required** (scope, the change and
+its reviews, CI, security alerts, the quality gate, the slots, the CMDB record, an existing change request) or
+**optional** (coverage measures, deployment history, metrics, support group, past changes). `EvidencePolicy`
+refuses a policy that leaves a section out or lists one twice. `assess_coverage` turns gaps and worker outcomes
+into a `Coverage`:
+- `insufficient`: a required section has a gap, or a gap names a section the policy doesn't know (fail closed);
+- `partial`: an optional section has a gap, or a worker was skipped, ran out of budget, or gave no valid answer;
+- `complete`: otherwise.
+
+**Why it matters.** "Run anyway, record the gap" (A1) only works if something decides what a gap means. A5 must
+not approve automatically on `insufficient` evidence, and the document says what's missing on `partial`.
+
+### D30. A global budget, enforced by a callback
+
+**What.** `BudgetGuard` is a LangChain callback with `raise_error=True`. Before every model call in the run
+(any worker, the supervisor), it compares what the run has spent (`UsageTracker`) with `RunBudget(max_tokens,
+max_cost_usd)` and raises `BudgetExceeded` when it's spent. The supervisor turns that into an `exhausted` gap for
+the worker, or for the follow-up step. If a cost limit is set and a model has no pricing, the cost can't be
+checked, so the guard stops the run (unknown is not zero). Each graph also has a `recursion_limit`: the
+supervisor's is fixed, and each worker's comes from its own budget.
+
+**Why it matters.** Per-worker budgets (A2) bound each loop, but not the run: four workers plus follow-ups can
+add up. A callback sees every model call without any node passing the budget around. It's a soft cap: calls
+already running when the limit is crossed finish (at most one per worker).
+
+### D31. Run identity flows through the config
+
+**What.** `run_config(run_id, thread_id, scenario=...)` puts all three in `configurable` (for nodes) and in
+`metadata` (for callbacks and traces, O1). Every node opens `run_context(config)`, which sets the integration
+layer's contextvars: the run id becomes every outbound call's `X-Correlation-ID`, and the scenario becomes
+`X-Mock-Scenario`. Setting them per node, not once around `ainvoke`, means a resumed run gets them too. A
+scenario is refused when `env` is `prod`.
+
+**Why it matters.** Evals (O2) run scenarios in parallel against one mock server, and traces have to be found by
+run and scenario. One config, read in one place, is how both stay consistent.
+
+### D32. Checkpointed state is ids, not tool output
+
+**What.** Worker subgraphs are compiled with `checkpointer=False` (including the prebuilt agent inside the Jira
+worker), so only the supervisor's state is checkpointed. The supervisor keeps each worker's report with its
+evidence ids (`TaskReport.collected`), not its tool artifacts. `checkpoint_serializer()` restores only the
+state's own types (an allowlist built from the state's models).
+
+**Why it matters.** Tool artifacts hold personal data and don't survive a round trip as objects. The serializer
+turns objects inside the artifact dataclass into plain dicts. Keeping ids makes the checkpoint small, safe to
+store and exact on resume. Without an allowlist, LangGraph restores any class a checkpoint names, which a future
+version blocks.
+
 ---
 
 ## 5. Known limitations and follow-ups
@@ -390,6 +454,10 @@ that can't be cited. Each test pins one of those down.
 | The budget is a soft cap, counted with one tokenizer | Close enough for every configured model | Revisit if a model with a very different tokenizer is added |
 | Tool calls aren't traced yet | Tests cover the behaviour | O1: spans per tool call with tokens, truncation and errors |
 | Tools are LangChain objects only | Enough for the LangGraph agents | M stories: the same tool functions served over MCP |
+| Evidence is fetched twice (collector and workers) | A reproducible record is worth the reads (ADR 0002) | O3: a per-run HTTP cache, if rate limits bite |
+| A thread per run (`release:{service}@{version}:{run_id}`) | A second run on a finished thread would append to its reports | P1: threads per release, with a rule for reruns |
+| A run stopped by the global budget loses that worker's partial work | The gap says so, and coverage becomes `partial` | Pass the budget into the worker loop so it can answer with what it has |
+| Workers use the primary model without a fallback (`get_chat_model`) | Workers bind their own tools, and fallbacks need binding per model | `get_resilient_model(role, prepare=bind_tools)` per worker |
 
 ## 6. Glossary
 

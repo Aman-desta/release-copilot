@@ -22,7 +22,7 @@ from urllib.parse import quote
 import httpx
 
 from release_copilot.integrations.breaker import CircuitBreaker
-from release_copilot.integrations.context import CORRELATION_HEADER, get_correlation_id
+from release_copilot.integrations.context import CORRELATION_HEADER, SCENARIO_HEADER, get_correlation_id, get_scenario
 from release_copilot.integrations.errors import (
     IntegrationError,
     UpstreamUnavailableError,
@@ -130,6 +130,8 @@ class ServiceClient:
         request_headers = dict(headers or {})
         if correlation_id := get_correlation_id():
             request_headers[CORRELATION_HEADER] = correlation_id
+        if scenario := get_scenario():
+            request_headers[SCENARIO_HEADER] = scenario
         t0 = time.perf_counter()
         try:
             response = await self._http.request(method, url, params=params, json=json, data=data, headers=request_headers)

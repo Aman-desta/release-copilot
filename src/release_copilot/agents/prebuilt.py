@@ -34,7 +34,7 @@ from release_copilot.agents.findings import (
     WorkerResult,
 )
 from release_copilot.agents.report import build_report, requested_tool_calls
-from release_copilot.agents.workers import WorkerSpec, release_brief
+from release_copilot.agents.workers import WorkerSpec, task_brief
 from release_copilot.evidence.model import ReleaseIdentity
 from release_copilot.tools.base import is_write_tool
 
@@ -44,6 +44,8 @@ STEPS_PER_MODEL_CALL = 6
 
 class PrebuiltWorkerState(TypedDict):
     identity: ReleaseIdentity
+    question: str | None
+    about: tuple[str, ...]
     report: WorkerReport
 
 
@@ -64,13 +66,14 @@ def build_prebuilt_worker(spec: WorkerSpec, tools: Sequence[BaseTool], model: Ba
         middleware=middleware,
         response_format=ToolStrategy(WorkerOutput),
         name=f"{spec.name}_agent",
+        checkpointer=False,  # the wrapper's checkpointer=False doesn't reach a graph invoked inside its node
     ).with_config(recursion_limit=STEPS_PER_MODEL_CALL * answer_calls)
     names = [t.name for t in tools]
 
     async def run_agent(state: PrebuiltWorkerState, config: RunnableConfig) -> dict:
         final: dict = {}
         # stream_mode="values" ends with the full state, including the middleware's counters (invoke() drops them).
-        async for final in agent.astream({"messages": [HumanMessage(release_brief(state["identity"]))]}, config, stream_mode="values"):
+        async for final in agent.astream({"messages": [HumanMessage(task_brief(state))]}, config, stream_mode="values"):
             pass
         messages = final["messages"]
         output = final.get("structured_response")
@@ -91,5 +94,5 @@ def build_prebuilt_worker(spec: WorkerSpec, tools: Sequence[BaseTool], model: Ba
     graph.add_node("agent", run_agent)
     graph.add_edge(START, "agent")
     graph.add_edge("agent", END)
-    return graph.compile(name=f"{spec.name}_worker")
+    return graph.compile(name=f"{spec.name}_worker", checkpointer=False)  # as the custom worker: see custom.py
 

@@ -8,6 +8,23 @@ from release_copilot_mocks.app import create_app
 
 from release_copilot.config import get_settings
 
+
+def pytest_addoption(parser):
+    parser.addoption("--live", action="store_true", help="also run tests marked live (real LLM calls, costs money)")
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "live: calls a real LLM; skipped unless pytest runs with --live")
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--live"):
+        return
+    skip = pytest.mark.skip(reason="real LLM test: run with --live")
+    for item in items:
+        if "live" in item.keywords:
+            item.add_marker(skip)
+
 # A complete, valid environment for Settings. Secret values are listed in SECRETS so tests can assert they never leak.
 BASE_ENV = {
     "RELEASE_COPILOT_ENV": "local",

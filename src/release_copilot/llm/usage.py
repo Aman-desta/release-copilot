@@ -84,6 +84,11 @@ class UsageTracker(BaseCallbackHandler):
             entry.cost_usd += (input_tokens * price.input_per_million + output_tokens * price.output_per_million) / 1_000_000
 
     @property
+    def total_tokens(self) -> int:
+        with self._lock:
+            return sum(u.total_tokens for u in self.by_role_model.values())
+
+    @property
     def total_cost_usd(self) -> float | None:
         costs = [u.cost_usd for u in self.by_role_model.values()]
         return None if any(c is None for c in costs) else round(sum(c for c in costs if c is not None), 6)

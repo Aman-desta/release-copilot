@@ -8,11 +8,22 @@ import openai
 import pytest
 from langchain_core.embeddings import Embeddings
 from langchain_core.messages import AIMessage
-from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings, ChatOpenAI, OpenAIEmbeddings
+from langchain_openai import (
+    AzureChatOpenAI,
+    AzureOpenAIEmbeddings,
+    ChatOpenAI,
+    OpenAIEmbeddings,
+)
 from pydantic import BaseModel, ValidationError
 
 from release_copilot.config import Settings
-from release_copilot.llm import ROLES, UsageTracker, get_chat_model, get_embeddings, get_resilient_model
+from release_copilot.llm import (
+    ROLES,
+    UsageTracker,
+    get_chat_model,
+    get_embeddings,
+    get_resilient_model,
+)
 from release_copilot.llm.factory import TRANSIENT_ERRORS
 from release_copilot.llm.fake import FakeChatModel
 from release_copilot.llm.pricing import price_for
@@ -131,6 +142,11 @@ def test_unknown_role_is_rejected(app_env):
 def fake(app_env):
     app_env.setenv("RELEASE_COPILOT_LLM__PROVIDER", "fake")
     return app_env
+
+
+def test_fake_model_scripts_accept_plain_text_and_messages():
+    model = FakeChatModel(responses=["plain", AIMessage(content="", tool_calls=[{"name": "t", "args": {}, "id": "1"}])])
+    assert model.invoke("hi").content == "plain" and model.invoke("again").tool_calls[0]["name"] == "t"
 
 
 def test_fake_provider_returns_fake_models(fake):
