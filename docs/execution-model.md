@@ -270,7 +270,7 @@ sequenceDiagram
     Note over H: breaker.before_call<br/>auth (OAuth2 token, cached and refreshed)<br/>headers: X-Correlation-ID, X-Mock-Scenario
     H->>X: HTTP
     X-->>H: 200 / 429 / 503 …
-    Note over H: retryable → backoff (honours Retry-After),<br/>within the deadline; otherwise raise IntegrationError
+    Note over H: retryable → backoff (honours Retry-After),<br/>within the deadline, otherwise raise IntegrationError
     H-->>C: response or IntegrationError
     C-->>T: typed models (Pydantic)
     T-->>N: ToolMessage(content, artifact)
