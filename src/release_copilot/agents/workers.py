@@ -106,6 +106,17 @@ error rates (HTTP 5xx) and response times that are already elevated, since they'
 WORKERS: dict[str, WorkerSpec] = {w.name: w for w in (JIRA, CHANGE, QUALITY, DEPLOY)}
 
 
+def span_names(specs: Mapping[str, WorkerSpec] = WORKERS) -> tuple[dict[str, str], tuple[str, ...]]:
+    """For tracing (O1): which span names start an agent, and which are tool runs.
+
+    The names are the compiled graphs' names: ``build_supervisor`` compiles ``supervisor``, each worker compiles
+    ``{name}_worker``. Spans inherit the innermost agent, so a worker's model and HTTP calls are that worker's.
+    """
+    agents = {"supervisor": "supervisor", **{f"{s.name}_worker": s.name for s in specs.values()}}
+    tools = tuple(sorted({t for s in specs.values() for t in s.tools}))
+    return agents, tools
+
+
 def release_brief(identity: ReleaseIdentity, *, question: str | None = None, about: Sequence[str] = ()) -> str:
     """The worker's task message. The naming conventions come from code (ReleaseIdentity), not the model.
 

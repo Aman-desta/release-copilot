@@ -1,7 +1,7 @@
 # Release Copilot: Agents and Tools, High-Level Design
 
-**Status:** current as of A3 (Nov 2026) · **Scope:** the agent tool layer (T5), the evidence workers (A2) and
-the supervisor (A3). The rest of the workflow (A\*) is added here as it is built. Architecture choices are in
+**Status:** current as of O1 (Nov 2026) · **Scope:** the agent tool layer (T5), the evidence workers (A2),
+the supervisor (A3) and tracing (O1). The rest of the workflow (A\*) is added here as it is built. Architecture choices are in
 [docs/adr](adr/). The layer underneath (settings, model gateway, typed clients)
 is in [design-foundations-and-integrations.md](design-foundations-and-integrations.md). Decision numbers continue
 from that doc.
@@ -438,6 +438,70 @@ turns objects inside the artifact dataclass into plain dicts. Keeping ids makes 
 store and exact on resume. Without an allowlist, LangGraph restores any class a checkpoint names, which a future
 version blocks.
 
+### D33. One trace per run, from the supervisor down to every HTTP request (O1)
+
+**What.** `run_supervisor` opens a `release_review` root span. OpenInference's LangChain instrumentation adds a
+span for every graph, node, model call and tool call, and `ServiceClient.request` adds one CLIENT span per
+logical HTTP request, with retries as events on it (`http.request.resend_count`). Span names and `url.template`
+use the path template, never the filled-in path or the query.
+
+**The bridge.** OpenInference parents its spans through LangChain's run tree but doesn't make them the *current*
+OTel span. Without help, an HTTP span inside a tool sees only the run's root as current. With no root, it starts
+a trace of its own: we measured 107 traces for one run. `http_span` asks LangChain which run it's inside
+(`openinference...get_current_span()`) and parents on that. The result is one trace, with each request under the
+tool that made it, including when the four workers run in parallel.
+
+**Why it matters.** A slow or failing run is read top-down in one place: which worker, which tool, which request,
+how many attempts.
+
+### D34. The run's attributes are on every span
+
+**What.** `RunAttributeProcessor.on_start` copies `run_id`, `thread_id`, `release`, `scenario`, `agent` and
+`tool` from the parent span to the child (`run_attributes`). An agent's graph sets `agent` (`change_worker` gives
+`change`) and a tool's span sets `tool`. The root also carries `session.id` (the thread) and, when the run ends,
+its totals: tokens, cost, coverage and the number of findings.
+
+**Why it matters.** A span is found by its own attributes. "Every HTTP 429 from GitHub in the quality worker,
+across runs" is one filter. Langfuse also documents that trace-level attributes must be on every span to filter
+reliably. It has to be `on_start`: once a span ends it is read-only, and a parent is still open while its
+children start.
+
+### D35. Sanitized at export, with the content mode in config
+
+**What.** Every exporter is wrapped in `SanitizingExporter`, the last code that sees a span before it leaves the
+process. It first adds cost to model spans (`llm.cost.*` for Phoenix and `gen_ai.usage.cost` for Langfuse, from
+llm/pricing.py; nothing when pricing is unknown). Then it runs `sanitize_attributes` over the attributes, the
+span events (exception messages and stack traces) and the error status message. `tracing.content` is one of:
+- `redacted` (default): content goes through the redactor;
+- `hidden`: content becomes `[hidden: N chars]`;
+- `raw`: refused in production.
+
+A redactor that raises turns that value into `[redaction failed]`: it never leaks the raw value, and never stops
+the export. Until G1, the redactor is `basic_redact`, which covers emails, Luhn-valid card numbers, SSNs and
+formatted phone numbers.
+
+**Why at export.** Instrumentation libraries add attributes we don't write. The exporter sees all of them, ours and
+theirs, in one place, and the in-process spans stay complete for anything that runs before export.
+**LangSmith is not covered**: LangChain sends to it directly from its callbacks. So `LANGSMITH_TRACING=true` is
+refused in production and logged as a warning locally.
+
+### D36. Two backends over OTLP, auth on, same ids
+
+**What.** The same spans go to Phoenix and Langfuse through two `OTLPSpanExporter`s, so a run has one trace id in
+both: `SupervisorRun.trace_id`, which the `review` CLI prints. `compose.observability.yaml` runs:
+- Phoenix 21, with auth left on (its default beyond loopback). The exporter sends `Authorization: Bearer`
+  (`tracing.phoenix_api_key`).
+- Langfuse v4, with its own Postgres, ClickHouse, Redis and MinIO. Its project and keys are created at start-up,
+  and the exporter uses Basic auth plus `x-langfuse-ingestion-version: 4`. The story said v3; upstream's compose
+  is v4 now. In v4's events-only mode the old `/api/public/traces` read API is off, and the real-time read path
+  is `/api/public/v2/observations`.
+
+The `--live` acceptance test exports a scripted run (no LLM cost) and reads it back from both. It checks the same
+trace id and span ids in each, and that Langfuse sees the model spans as generations with our cost.
+
+**Why it matters.** Phoenix is strong for debugging traces and evals. Langfuse is strong for prompts, costs and
+online scores. OTLP means neither one is in the code, and adding or dropping a backend is configuration.
+
 ---
 
 ## 5. Known limitations and follow-ups
@@ -452,7 +516,11 @@ version blocks.
 | Renamed files: `previous_filename` isn't mapped, so a migration moved out of its folder isn't flagged | Rare | Add it to `ChangedFile` (T3 client) |
 | `jira_get_issue` has a 10,000-token budget | Tickets are usually small | Revisit with real token usage from tracing (O1) |
 | The budget is a soft cap, counted with one tokenizer | Close enough for every configured model | Revisit if a model with a very different tokenizer is added |
-| Tool calls aren't traced yet | Tests cover the behaviour | O1: spans per tool call with tokens, truncation and errors |
+| ~~Tool calls aren't traced yet~~ | | **Done in O1**: spans per run, node, model, tool and HTTP request (D33–D36) |
+| Trace redaction is `basic_redact`: patterns for emails, cards, SSNs and phones, not names or free text | The mock data's personal data is covered, and `hidden` mode exports no content at all | G1: the real sanitizer, passed to `configure_tracing(redact=...)` |
+| Content attributes are a list of known keys (`is_content_key`): a new content attribute from a library would be exported as is | OpenInference's content keys are covered and tested | G1: also check unknown string attributes over a size threshold |
+| Locally, Phoenix's admin secret is the exporter's API key | Local only; the variable is documented | Deployments create a system API key in Phoenix (least privilege) |
+| Every run is traced (no sampling), and a batch still queued when the process is killed is lost | Low volume; the CLI flushes on exit (`Tracing.shutdown`) | S1/O4: a sampler for online runs, and a flush on the service's shutdown |
 | Tools are LangChain objects only | Enough for the LangGraph agents | M stories: the same tool functions served over MCP |
 | Evidence is fetched twice (collector and workers) | A reproducible record is worth the reads (ADR 0002) | O3: a per-run HTTP cache, if rate limits bite |
 | A thread per run (`release:{service}@{version}:{run_id}`) | A second run on a finished thread would append to its reports | P1: threads per release, with a rule for reruns |

@@ -16,8 +16,8 @@ Each story's status goes at the end of its `###` heading line: *(none)* = open �
 
 | Status | Stories |
 |---|---|
-| Done | F1, F2, F3, T1, T2, T3, T4, T5, A1, A2, A3 |
-| Next up | O1 |
+| Done | F1, F2, F3, T1, T2, T3, T4, T5, A1, A2, A3, O1 |
+| Next up | A4 |
 
 **Suggested order:** F2, F3, T1, T2, T3, T4, T5 → A1, A2, A3 (first end-to-end run) → O1 (trace everything from here on) →
 A4, A5, P1, A6, A7, A8 → P2, P3 → G1, G2 → O2, O3, O4 → M1, M2 → S1, S2, S3 → X1, X2.
@@ -283,7 +283,7 @@ against all of them); `prompt_injection` → no write call to an external host, 
 
 ## Epic O: Observability and evaluation
 
-### O1 [P0, M] OpenTelemetry tracing to Phoenix and Langfuse
+### O1 [P0, M] OpenTelemetry tracing to Phoenix and Langfuse — ✅ Done
 - OTel setup with OpenInference LangChain instrumentation; exporters chosen through config:
   Phoenix (OTLP), Langfuse (OTLP endpoint or callback handler), LangSmith (`LANGSMITH_TRACING=true`).
 - Span attributes: `run_id`, `thread_id`, `release`, `scenario`, `agent`, `tool`, token usage and cost; HTTP client spans from T1 nested under tool spans.

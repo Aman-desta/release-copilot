@@ -1,0 +1,189 @@
+# Tracing backends for Release Copilot (story O1): Arize Phoenix, and self-hosted Langfuse with its own
+# Postgres, ClickHouse, Redis and MinIO. Separate from compose.yaml so the app stack stays small.
+#   make obs-up      start everything and wait until it's healthy
+#   make obs-down    stop (data volumes are kept)
+#
+# Phoenix:  http://localhost:6006   (UI and OTLP/HTTP at /v1/traces; Bearer auth; UI login admin@localhost / admin,
+#                                    which Phoenix asks you to change on first login)
+# Langfuse: http://localhost:3000   (OTLP/HTTP at /api/public/otel/v1/traces; Basic auth with the project keys)
+#
+# Adapted from Langfuse's docker-compose.yml (v4): the AI gateway is left out, every port is bound to localhost,
+# and the project, its API keys and a user are created at start-up (LANGFUSE_INIT_*), so traces can be sent
+# without clicking through the UI. The defaults are for a laptop only: set real secrets in .env elsewhere.
+
+name: release-copilot-observability
+
+x-langfuse-env: &langfuse-env
+  NEXTAUTH_URL: http://localhost:3000
+  DATABASE_URL: postgresql://postgres:${LANGFUSE_DB_PASSWORD:-langfuse-local}@langfuse-postgres:5432/postgres
+  SALT: ${LANGFUSE_SALT:-release-copilot-local-salt}
+  ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}  # openssl rand -hex 32
+  TELEMETRY_ENABLED: "false"
+  CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+  CLICKHOUSE_URL: http://clickhouse:8123
+  CLICKHOUSE_USER: clickhouse
+  CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse-local}
+  CLICKHOUSE_CLUSTER_ENABLED: "false"
+  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:-minio-local-secret}
+  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+  LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+  LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
+  LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:-minio-local-secret}
+  LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_AUTH: ${LANGFUSE_REDIS_AUTH:-redis-local-secret}
+
+x-langfuse-depends-on: &langfuse-depends-on
+  langfuse-postgres:
+    condition: service_healthy
+  minio:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  clickhouse:
+    condition: service_healthy
+
+services:
+  phoenix:
+    image: arizephoenix/phoenix:version-21.0.0
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data  # SQLite in the volume; set PHOENIX_SQL_DATABASE_URL for Postgres
+      # Phoenix turns auth on whenever it listens beyond loopback (always, in a container). Keep it on: the OTLP
+      # endpoint and the REST API then need "Authorization: Bearer <key>". PHOENIX_ADMIN_SECRET is accepted as that
+      # key, which is what the app uses locally; elsewhere, create a system API key in the UI (Settings > API Keys).
+      # Each needs 32+ characters with a digit and a lower-case letter; they must differ.
+      PHOENIX_ENABLE_AUTH: "true"
+      PHOENIX_SECRET: ${PHOENIX_SECRET:-release-copilot-local-phoenix-secret-0001}
+      PHOENIX_ADMIN_SECRET: ${PHOENIX_ADMIN_SECRET:-release-copilot-local-phoenix-admin-0001}
+    ports:
+      - 127.0.0.1:6006:6006  # UI and OTLP/HTTP
+      - 127.0.0.1:4317:4317  # OTLP/gRPC (we export over HTTP)
+    volumes:
+      - phoenix_data:/mnt/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:6006/healthz')"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  langfuse-web:
+    image: docker.io/langfuse/langfuse:${LANGFUSE_IMAGE_TAG:-4.76.0}
+    depends_on: *langfuse-depends-on
+    ports:
+      - 127.0.0.1:3000:3000
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-release-copilot-local-nextauth}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:9090
+      LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: http://minio:9000
+      # Headless set-up: the org, the project, its API keys and a login, created on first start.
+      LANGFUSE_INIT_ORG_ID: release-copilot
+      LANGFUSE_INIT_ORG_NAME: Release Copilot
+      LANGFUSE_INIT_PROJECT_ID: release-copilot
+      LANGFUSE_INIT_PROJECT_NAME: release-copilot
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-pk-lf-release-copilot-local}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY:-sk-lf-release-copilot-local}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-dev@release-copilot.local}
+      LANGFUSE_INIT_USER_NAME: Developer
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-release-copilot-local}
+    healthcheck:
+      # Next.js listens on the container's $HOSTNAME, not on 127.0.0.1 (and the image has no `hostname` binary).
+      test: ["CMD-SHELL", "wget -qO /dev/null http://$${HOSTNAME}:3000/api/public/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    restart: unless-stopped
+
+  langfuse-worker:
+    image: docker.io/langfuse/langfuse-worker:${LANGFUSE_IMAGE_TAG:-4.76.0}
+    depends_on: *langfuse-depends-on
+    environment:
+      <<: *langfuse-env
+    restart: unless-stopped
+
+  langfuse-postgres:
+    image: docker.io/postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse-local}
+      POSTGRES_DB: postgres
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:26.3.62.3
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse-local}
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+    restart: unless-stopped
+
+  minio:
+    image: cgr.dev/chainguard/minio  # Chainguard publishes only "latest" for free; Langfuse's file doesn't pin it either
+    entrypoint: sh
+    # Creates the "langfuse" bucket before the server starts.
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:-minio-local-secret}
+    ports:
+      - 127.0.0.1:9090:9000  # media uploads from the browser
+    volumes:
+      - langfuse_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+    restart: unless-stopped
+
+  redis:
+    image: docker.io/redis:7
+    command: >
+      --requirepass ${LANGFUSE_REDIS_AUTH:-redis-local-secret}
+      --maxmemory-policy noeviction
+    volumes:
+      - langfuse_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  phoenix_data:
+  langfuse_postgres_data:
+  langfuse_clickhouse_data:
+  langfuse_clickhouse_logs:
+  langfuse_minio_data:
+  langfuse_redis_data:

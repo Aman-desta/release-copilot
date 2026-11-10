@@ -1,4 +1,6 @@
-.PHONY: up down ps logs migrate revision psql psql-admin test db-destroy
+.PHONY: up down ps logs migrate revision psql psql-admin test db-destroy obs-up obs-down obs-logs review
+
+OBS = docker compose -f compose.observability.yaml
 
 up:            ## start Postgres + mocks and wait until healthy
 	docker compose up -d --build
@@ -38,3 +40,22 @@ test:
 
 db-destroy:    ## DESTRUCTIVE: delete containers AND the data volume (init scripts re-run on next up)
 	docker compose down -v
+
+obs-up:        ## start Phoenix (:6006) and Langfuse (:3000), wait until healthy (the worker has no health check)
+	$(OBS) up -d
+	@for i in $$(seq 180); do \
+	  states="$$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' $$($(OBS) ps -q) | sort -u | tr '\n' ' ')"; \
+	  case "$$states" in *starting*|*unhealthy*|*created*) ;; *) break;; esac; \
+	  [ $$i = 180 ] && { echo "not healthy: $$states"; $(OBS) ps; exit 1; }; \
+	  sleep 1; \
+	done
+	@$(OBS) ps
+
+obs-down:      ## stop the tracing backends (data volumes are kept)
+	$(OBS) down
+
+obs-logs:
+	$(OBS) logs -f --tail=100
+
+review:        ## make review s=clean: one traced review (needs make up, make obs-up and a real LLM in .env)
+	uv run python -m release_copilot.review --scenario $(or $(s),clean)

@@ -131,6 +131,33 @@ class LLMSettings(_Section):
         return self
 
 
+ContentMode = Literal["raw", "redacted", "hidden"]
+
+
+class TracingSettings(_Section):
+    """OpenTelemetry tracing (story O1). Off unless ``enabled``; each backend is on when its endpoint is set.
+
+    ``content`` decides what prompts, tool output and exception messages look like in exported spans:
+    ``redacted`` (default) runs the sanitizer over them, ``hidden`` replaces them with a size marker, ``raw``
+    exports them unchanged (local debugging only: refused in production).
+    """
+
+    enabled: bool = False
+    service_name: str = "release-copilot"
+    content: ContentMode = "redacted"
+    phoenix_endpoint: AnyHttpUrl | None = None  # OTLP/HTTP traces, e.g. http://localhost:6006/v1/traces
+    phoenix_api_key: SecretStr | None = None  # sent as "Authorization: Bearer"; Phoenix requires it when auth is on
+    langfuse_endpoint: AnyHttpUrl | None = None  # e.g. http://localhost:3000/api/public/otel/v1/traces
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: SecretStr | None = None
+
+    @model_validator(mode="after")
+    def _langfuse_keys(self) -> "TracingSettings":
+        if self.langfuse_endpoint is not None and not (self.langfuse_public_key and self.langfuse_secret_key):
+            raise ValueError("langfuse_endpoint requires langfuse_public_key and langfuse_secret_key")
+        return self
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="RELEASE_COPILOT_",
@@ -152,6 +179,7 @@ class Settings(BaseSettings):
     servicenow: ServiceNowSettings
     notify: NotifySettings = Field(default_factory=NotifySettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
+    tracing: TracingSettings = Field(default_factory=TracingSettings)
 
     @field_validator("database_url")
     @classmethod
@@ -172,6 +200,8 @@ class Settings(BaseSettings):
     def _production_rules(self) -> "Settings":
         if self.env != "prod":
             return self
+        if self.tracing.content == "raw":
+            raise ValueError("production traces can't export raw content: set tracing.content to redacted or hidden")
         url = urlsplit(self.database_url.get_secret_value())
         if url.username is not None and unquote(url.username) == "postgres":
             raise ValueError("production database connections must not use the postgres superuser")
@@ -184,7 +214,7 @@ class Settings(BaseSettings):
 
     def _integration_urls(self) -> list[tuple[str, str]]:
         urls: list[tuple[str, str]] = []
-        for section_name in ("jira", "github", "azure", "sonar", "servicenow", "notify"):
+        for section_name in ("jira", "github", "azure", "sonar", "servicenow", "notify", "tracing"):
             section = getattr(self, section_name)
             for field_name in type(section).model_fields:
                 value = getattr(section, field_name)

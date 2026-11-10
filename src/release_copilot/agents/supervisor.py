@@ -71,6 +71,7 @@ from release_copilot.evidence.index import EvidenceIndex
 from release_copilot.evidence.model import EvidenceGap, ReleaseEvidence, ReleaseIdentity
 from release_copilot.llm.factory import get_chat_model
 from release_copilot.llm.usage import UsageTracker
+from release_copilot.observability.tracing import run_span, trace_id_of
 from release_copilot.tools.toolbox import Toolbox
 
 MAX_ROUNDS = 2  # the workers' own round, then at most one follow-up round
@@ -300,6 +301,7 @@ def build_supervisor(
 class SupervisorRun:
     assessment: ReleaseAssessment
     usage: dict[str, Any]  # UsageTracker.summary(): tokens and cost by role and model
+    trace_id: str | None = None  # the OTel trace id (32 hex digits), the same in Phoenix and Langfuse; None when tracing is off
 
 
 async def run_supervisor(
@@ -313,14 +315,26 @@ async def run_supervisor(
     callbacks: list[Any] | None = None,
 ) -> SupervisorRun:
     tracker = UsageTracker()
+    thread_id = thread_id or release_thread_id(identity, run_id)
     config = run_config(
         run_id,
-        thread_id or release_thread_id(identity, run_id),
+        thread_id,
         scenario=scenario,
         callbacks=[tracker, BudgetGuard(budget, tracker), *(callbacks or [])],
     )
-    out = await supervisor.ainvoke(SupervisorInput(identity=identity), config)
-    return SupervisorRun(assessment=out["assessment"], usage=tracker.summary())
+    with run_span(run_id=run_id, thread_id=thread_id, release=identity.correlation_id, scenario=scenario) as span:
+        out = await supervisor.ainvoke(SupervisorInput(identity=identity), config)
+        assessment: ReleaseAssessment = out["assessment"]
+        usage = tracker.summary()
+        # The run's totals and outcome on the root, so runs can be compared and filtered without opening them.
+        span.set_attributes({
+            "release_copilot.usage.total_tokens": usage["total_tokens"],
+            "release_copilot.coverage": assessment.coverage.status,
+            "release_copilot.findings": len(assessment.findings),
+        })
+        if usage["total_cost_usd"] is not None:
+            span.set_attribute("release_copilot.usage.cost_usd", usage["total_cost_usd"])
+    return SupervisorRun(assessment=assessment, usage=usage, trace_id=trace_id_of(span))
 
 
 # ---------------------------------------------------------------------------------------------- helpers

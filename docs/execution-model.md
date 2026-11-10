@@ -3,7 +3,7 @@
 What happens, from start to finish, when Release Copilot reviews a release. This is a map, not a spec: each
 section names the code to read and the design record (ADR or decision D*n*) that explains why it's built that way.
 
-**Status:** current as of A3 (2026-11-08). Parts that later stories add are marked *(planned, story)*.
+**Status:** current as of O1 (2026-11-09). Parts that later stories add are marked *(planned, story)*.
 
 ---
 
@@ -420,8 +420,46 @@ flowchart LR
     A5 --> A6["A6 change request<br/>idempotent (correlation_id)"]
     A6 --> A7["A7 approval by risk tier<br/>interrupt() + Postgres checkpointer<br/>resume on webhook"]
     A7 --> A8["A8 slot swap, health watch,<br/>rollback"]
-    O1["O1 tracing: spans for every node,<br/>model and tool call, keyed by run metadata"] -.-> RA
 ```
+
+---
+
+## 11b. Tracing: the same run, as spans (O1)
+
+**Code:** `observability/tracing.py`. **Why:** D33–D36.
+
+Every run is one trace. Its shape is the execution model above:
+
+```
+release_review                          run_id · thread_id · release · scenario · totals (tokens, cost, coverage)
+└── supervisor                          agent=supervisor
+    ├── collect
+    │   └── GET /rest/api/3/search/jql  agent=supervisor          (the collector's requests)
+    ├── plan
+    ├── worker
+    │   └── change_worker               agent=change
+    │       ├── agent → FakeChatModel   tokens, cost
+    │       └── tools → github_compare  tool=github_compare
+    │                   └── GET /repos/{owner}/{repo}/compare/{base}...{head}   status, retries as events
+    ├── review                          (a model call only when a finding is severe)
+    └── finalize
+```
+
+```mermaid
+flowchart LR
+    spans["spans in the process<br/>(complete)"] --> proc["RunAttributeProcessor<br/>on_start: copy run attributes,<br/>name agent and tool"]
+    proc --> exp["SanitizingExporter<br/>add cost, then redact or hide<br/>attributes, events, status"]
+    exp --> P[("Phoenix<br/>Bearer auth")]
+    exp --> L[("Langfuse v4<br/>Basic auth")]
+    lc["LangChain callbacks"] -. "LANGSMITH_TRACING=true<br/>(unsanitized: refused in prod)" .-> LS[("LangSmith")]
+```
+
+- **One trace id in both backends.** The same spans go to each over OTLP. `SupervisorRun.trace_id` is the
+  32-hex-digit id, and `python -m release_copilot.review` prints it.
+- **Context bridge.** OpenInference doesn't make its spans current, so an HTTP span asks LangChain's run context
+  for its parent. That's how a request lands under the tool that made it.
+- **Content modes:** `redacted` (default), `hidden` (sizes only) or `raw` (local only). Ids, names, token counts
+  and status codes are never content, so they're always exported.
 
 ---
 

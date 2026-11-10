@@ -22,7 +22,12 @@ from urllib.parse import quote
 import httpx
 
 from release_copilot.integrations.breaker import CircuitBreaker
-from release_copilot.integrations.context import CORRELATION_HEADER, SCENARIO_HEADER, get_correlation_id, get_scenario
+from release_copilot.integrations.context import (
+    CORRELATION_HEADER,
+    SCENARIO_HEADER,
+    get_correlation_id,
+    get_scenario,
+)
 from release_copilot.integrations.errors import (
     IntegrationError,
     UpstreamUnavailableError,
@@ -30,6 +35,7 @@ from release_copilot.integrations.errors import (
     error_from_transport,
 )
 from release_copilot.integrations.retry import RetryPolicy
+from release_copilot.observability.tracing import http_span, record_error
 
 log = logging.getLogger("release_copilot.integrations.http")
 USER_AGENT = "release-copilot/0.1"
@@ -103,26 +109,34 @@ class ServiceClient:
         expected = set(ok)
         started = self._clock()
         attempt = 0
-        while True:
-            attempt += 1
-            self.breaker.before_call(method, path)
-            error, response = await self._attempt(method, url, path, attempt, params, json, data, headers)
-            if error is None and response is not None and response.status_code in expected:
-                self.breaker.record_success()
-                return response
-            if error is None:
-                assert response is not None
-                error = error_from_response(self.service, response, path=path)
-            self._record_for_breaker(error)
+        # One span for the logical call (O1): retries are events on it, so a trace shows "1 request, 3 attempts".
+        with http_span(self.service, method, path) as span:
+            while True:
+                attempt += 1
+                span.set_attribute("http.request.resend_count", attempt - 1)
+                self.breaker.before_call(method, path)
+                error, response = await self._attempt(method, url, path, attempt, params, json, data, headers)
+                if response is not None:
+                    span.set_attribute("http.response.status_code", response.status_code)
+                if error is None and response is not None and response.status_code in expected:
+                    self.breaker.record_success()
+                    return response
+                if error is None:
+                    assert response is not None
+                    error = error_from_response(self.service, response, path=path)
+                self._record_for_breaker(error)
 
-            if attempt >= self.retry.max_attempts or not self.retry.is_retryable(method, error, idempotent=idempotent):
-                raise error
-            wait = self.retry.backoff(attempt, error.retry_after)
-            if self._clock() - started + wait > self.retry.deadline_seconds:
-                log.warning("%s %s %s: giving up, retry would exceed the %.0fs deadline", self.service, method, path, self.retry.deadline_seconds)
-                raise error
-            log.info("%s %s %s: retrying in %.2fs after %s", self.service, method, path, wait, type(error).__name__)
-            await self._sleep(wait)
+                if attempt >= self.retry.max_attempts or not self.retry.is_retryable(method, error, idempotent=idempotent):
+                    record_error(span, error)
+                    raise error
+                wait = self.retry.backoff(attempt, error.retry_after)
+                if self._clock() - started + wait > self.retry.deadline_seconds:
+                    log.warning("%s %s %s: giving up, retry would exceed the %.0fs deadline", self.service, method, path, self.retry.deadline_seconds)
+                    record_error(span, error)
+                    raise error
+                log.info("%s %s %s: retrying in %.2fs after %s", self.service, method, path, wait, type(error).__name__)
+                span.add_event("retry", {"attempt": attempt, "error.type": type(error).__name__, "wait_seconds": round(wait, 3)})
+                await self._sleep(wait)
 
     async def _attempt(
         self, method: str, url: str, path: str, attempt: int, params: Any, json: Any, data: Any, headers: Mapping[str, str] | None

@@ -23,6 +23,10 @@ dependencies = [
     "numpy>=2.4.6",
     "langgraph>=1.2.19",
     "langchain>=1.4.8",
+    "opentelemetry-sdk>=1.45",
+    "opentelemetry-exporter-otlp-proto-http>=1.45",
+    "openinference-instrumentation-langchain>=0.1.82",
+    "openinference-semantic-conventions>=0.1.43",
 ]
 
 [tool.setuptools.packages.find]
