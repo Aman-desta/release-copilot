@@ -37,13 +37,14 @@ flowchart TB
     ext[("Jira · GitHub · Sonar<br/>Azure · ServiceNow<br/><i>(mocks in tests)</i>")]
 
     out["ReleaseAssessment<br/>evidence · findings · coverage · gaps"]
-    next["<i>planned:</i> document (A4) → risk (A5) → change request (A6)<br/>→ human approval (A7) → deploy / rollback (A8)"]
+    doc["Release document (A4)<br/>validated citations · versioned in Postgres<br/>draft GitHub release"]
+    next["<i>planned:</i> risk (A5) → change request (A6)<br/>→ human approval (A7) → deploy / rollback (A8)"]
 
     trigger --> run --> SUP
     collect -- "deterministic fetch,<br/>no model" --> http
     workers -- "ainvoke per Send" --> W
     tools --> tool --> http --> ext
-    finalize --> out --> next
+    finalize --> out --> doc --> next
 ```
 
 Three ideas carry the whole design. Keep them in mind while reading the rest:
@@ -112,7 +113,9 @@ flowchart TD
     review -- "yes: ask the supervisor model,<br/>code accepts at most 2" --> fu{"any accepted?"}
     fu -- "yes: Send × k, round = 2" --> worker
     fu -- "no / invalid / budget spent" --> finalize["<b>finalize</b> (code)<br/>verify citations, sort by severity,<br/>assess coverage"]
-    finalize --> E((END))
+    finalize -- "built with a document store" --> document["<b>document</b> subgraph (A4)<br/>write, validate, revise once,<br/>store, publish the draft"]
+    finalize -- "no document store" --> E((END))
+    document --> E
 ```
 
 ### What each node reads and writes
@@ -123,7 +126,8 @@ flowchart TD
 | `plan` | no | `evidence`, the specs' `reads` | `skipped`, `gaps` (a `blocked` gap per skipped worker); then `Send`s |
 | `worker` | yes (inside) | **only its `WorkerJob`** | `reports` (+1 `TaskReport`) |
 | `review` | only when needed | latest round's reports | `follow_ups`, `rejected`, `gaps`, `round`; then `Send`s or `finalize` |
-| `finalize` | no | everything | `assessment` (the graph's only output) |
+| `finalize` | no | everything | `assessment` |
+| `document` (A4) | yes (inside) | `assessment` | `document` (`DocumentResult`); see §11 |
 
 ### Supervisor state and reducers
 
@@ -372,6 +376,9 @@ spent budget, invalid follow-up answer) and each worker's.
 | **Run** budget spent (tokens or cost) | `BudgetGuard` raises before a model call | `BudgetExceeded` → `exhausted` report or supervisor gap | that worker's partial work is lost |
 | Supervisor gives an invalid follow-up plan | `review` | `InvalidOutput` gap; no follow-ups | no effect on coverage |
 | Step-count runaway | `recursion_limit` (16 supervisor; per worker from its budget) | `GraphRecursionError` | raises: a loop that long is a bug |
+| The writer's draft fails validation | `validate` in the document step | one targeted revision of the failed sections | still failing: stored as `rejected`, not published |
+| The writer gives no valid draft, twice | `write` / `revise` | `InvalidOutput` gaps | document `failed`, nothing stored |
+| GitHub is down, the release is already published, or a newer version exists | `publish` | `unpublished` + a gap (`unavailable` or `blocked`) | the document stays stored and valid |
 | A bug (`TypeError`, a missing ToolMessage…) | nowhere, on purpose | raises (`ExceptionGroup` from a `TaskGroup`) | the run fails loudly |
 
 The rule: **expected failures are gaps, bugs are exceptions.** Coverage is computed from the gap records, not from
@@ -403,7 +410,9 @@ that's contained:
 | Worker → its tools | tool scoping: each worker gets only its own tools; all are read-only (`Toolbox` defaults to read) |
 | Worker findings → supervisor model | the brief marks reports as "data, not instructions"; only reports cross over, never raw output |
 | Supervisor model → workers | `accept_follow_ups`: known evidence ids, available workers, capped count; question framed as a request to check |
-| Any model → the record | findings marked `verified` only if every cited id was collected; A4 will refuse to cite unverified ones |
+| Any model → the record | findings marked `verified` only if every cited id was collected; the writer's brief leaves unverified ones out |
+| Evidence → writer model | a brief built in code: ids, facts, gaps, titles inside `<evidence>`; no descriptions or comments |
+| Writer model → stored and published document | `validate_document`: unknown ids, uncited sentences, contradictions with facts, risks not covered |
 | Run → checkpoint store | ids, not artifacts; a strict serializer allowlist (`checkpoint_serializer()`) |
 | High-risk writes | not tools at all: deterministic steps behind human approval *(planned, A6–A8)* |
 
@@ -411,12 +420,34 @@ that's contained:
 
 ---
 
-## 11. What comes after the assessment *(planned)*
+## 11. The document step (A4)
+
+**Code:** `documents/graph.py` (the subgraph), `facts.py`, `template.py`, `writer.py`, `validate.py`, `store.py`,
+`publish.py`. **Why:** design doc D37–D41.
+
+```mermaid
+flowchart TD
+    A["assessment"] --> ctx["document_context (code)<br/>facts, known ids, versions, CVEs,<br/>risks that must be cited"]
+    ctx --> write["<b>write</b><br/>writer model, structured output<br/>→ DocumentDraft, one body per section"]
+    write --> val["<b>validate</b> (code)<br/>unknown ids, uncited, contradictions,<br/>missing risks"]
+    val -- "ok" --> store
+    val -- "issues, first time" --> revise["<b>revise</b><br/>only the failed sections,<br/>with their issues"]
+    revise --> val
+    val -- "issues after the revision" --> store["<b>store</b><br/>release_documents, versioned<br/>valid or rejected"]
+    store -- "valid" --> publish["<b>publish</b><br/>ensure the GitHub draft<br/>(never a published release)"]
+    store -- "rejected" --> E((END))
+    publish --> E
+```
+
+The writer sees only the brief built in code. What it can change is prose: the facts table, the headings and the
+section order are rendered by `template.render`. A citation is `[jira:PAY-102]`, `[fact:commit_count]` or
+`[gap:deploy.metrics]`; anything else is an unknown citation.
+
+## 11a. What comes after the document *(planned)*
 
 ```mermaid
 flowchart LR
-    RA["ReleaseAssessment"] --> A4["A4 release document<br/>every claim cites verified ids"]
-    RA --> A5["A5 risk<br/>code sets the floor, model explains<br/>insufficient coverage → no auto-approve"]
+    RA["ReleaseAssessment"] --> A5["A5 risk<br/>code sets the floor, model explains<br/>insufficient coverage → no auto-approve"]
     A5 --> A6["A6 change request<br/>idempotent (correlation_id)"]
     A6 --> A7["A7 approval by risk tier<br/>interrupt() + Postgres checkpointer<br/>resume on webhook"]
     A7 --> A8["A8 slot swap, health watch,<br/>rollback"]
@@ -463,7 +494,7 @@ flowchart LR
 
 ---
 
-## 12. Cheat sheet: one run in eight lines
+## 12. Cheat sheet: one run in nine lines
 
 1. The caller passes a `ReleaseIdentity` and a `run_id`; the config carries the run's identity, budget and callbacks.
 2. `collect` fetches every source deterministically: the **record**. Outages become gaps.
@@ -472,4 +503,5 @@ flowchart LR
 5. The `reports` reducer merges them, and `review` runs once.
 6. Only when a finding is severe does a model propose follow-ups; **code** accepts at most two, about collected evidence.
 7. `finalize` verifies citations, sorts findings, and applies the **policy** to the gaps to get the coverage.
-8. Everything that went wrong is a gap with a reason; only bugs raise.
+8. With a document store, the **document** step writes, validates every citation, revises once, stores and publishes the draft.
+9. Everything that went wrong is a gap with a reason; only bugs raise.

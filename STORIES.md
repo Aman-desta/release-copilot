@@ -176,7 +176,7 @@ outage of one service produces a recorded gap, not a failed run.
 **Acceptance:** an end-to-end run for all six scenarios with the fake model produces a `ReleaseEvidence`
 plus findings; a real-model smoke test (marked `@pytest.mark.live`, skipped by default) runs `clean`.
 
-### A4 [P0, M] Release document generation with verified citations
+### A4 [P0, M] Release document generation with verified citations 🔵 In progress
 - A writer node produces a release document (Markdown, fixed template: summary, scope, changes by area,
   quality and security, deployment and migration notes, risks, rollback summary). **Every factual sentence cites
   evidence IDs** `[jira:PAY-102]`.

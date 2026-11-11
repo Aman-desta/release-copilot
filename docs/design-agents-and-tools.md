@@ -502,6 +502,60 @@ trace id and span ids in each, and that Langfuse sees the model spans as generat
 **Why it matters.** Phoenix is strong for debugging traces and evals. Langfuse is strong for prompts, costs and
 online scores. OTLP means neither one is in the code, and adding or dropping a backend is configuration.
 
+### D37. The release document: facts in code, prose in the model, a fixed template (A4)
+
+**What.** `documents/facts.py` computes `ReleaseFacts` from the assessment (counts, the gate status, blocking
+alerts, migrations, untracked commits, what each slot runs). The writer model fills a `DocumentDraft` through
+structured output: one Markdown body per section. Code renders the title, a **facts table** and the headings
+(`template.render`). The model never writes a number into the table, can't drop or reorder a section, and sees a
+brief built in code: ids, facts, gaps and *verified* findings only. Ticket descriptions and comments stay out
+(injection and personal data, D23).
+
+**Why it matters.** The parts of a release note that must be right (the numbers, what is blocking) are right by
+construction. The model's job shrinks to what it is good at: wording and grouping.
+
+### D38. Everything the document says is citable, including "none" and "unknown"
+
+**What.** Citations are `[source:id]`, one id per pair of brackets. Besides evidence ids (D24), two kinds of ids
+exist for the document: `fact:<name>` for a known fact and `gap:<section>` for a recorded gap. "No alert is open
+[fact:blocking_alerts]" and "error rates are unknown [gap:deploy.metrics]" are cited claims. An unknown fact
+(`None`) is **not** citable: citing `fact:gate_status` when the gate couldn't be read is an unknown citation.
+
+**Why it matters.** An empty list has no evidence id and an outage has no evidence at all, yet both are facts the
+reader needs. Without these ids the writer either leaves those sentences uncited (and fails) or cites something
+nearby (and misleads).
+
+### D39. A deterministic citation validator, and one targeted revision
+
+**What.** `validate_document` checks four things and nothing it can't decide: unknown ids (every section), uncited
+sentences (the required sections: scope, changes, quality, deployment, risks), contradictions with the facts
+(totals, the gate, versions, CVE ids), and **coverage of risks**. Code lists the risks the risks section must cite
+(`must_cite_in_risks`: each blocking alert, a failing gate, failing checks, untracked commits), and any one id of an
+entry satisfies it. The claim patterns are deliberately narrow ("contains 8 commits" is a total, "1 untracked
+commit" is not): a validator that rejects good documents trains nobody.
+A failed draft goes back once with only its failed sections and their issues (`revision_brief`), and only those
+sections are taken from the answer (`apply_revision`), so a revision can't break a section that passed.
+
+**Why it matters.** This is groundedness checked by code, not by a judge model: cheap, deterministic, and
+testable with a fake citation. The judge (O-stories) scores what code can't (relevance, faithfulness of
+wording); G2 reuses this validator on every output before it is published.
+
+### D40. Every document is stored and versioned, and a save is "ensure state"
+
+**What.** `release_documents` (migration 0002) keeps valid **and** rejected documents, versioned per release
+(`payments-api@2.4.0`). The content key is a hash of the Markdown, the status and the evidence fingerprint: saving
+the same content again returns the existing version, so retries and re-runs on unchanged evidence don't add v2, v3.
+In Postgres a transaction-level advisory lock per release serialises `max(version) + 1`; the unique constraints
+`(release, version)` and `(release, content_key)` are the backstop. `InMemoryDocumentStore` passes the same tests.
+
+### D41. The GitHub draft: ensure, never overwrite a published release, latest version only
+
+**What.** `ensure_draft_release` makes the tag's release a draft whose notes are the document: create it, update
+its notes, or do nothing when they already match. Two refusals, both `unpublished` results with a gap, never
+errors: a release that is already **published** is not touched, and a document that is not the release's
+**latest valid version** (a slower, older run) is not published. Only valid documents are published at all.
+A GitHub outage leaves the document stored and valid, with a retryable gap.
+
 ---
 
 ## 5. Known limitations and follow-ups
@@ -526,6 +580,10 @@ online scores. OTLP means neither one is in the code, and adding or dropping a b
 | A thread per run (`release:{service}@{version}:{run_id}`) | A second run on a finished thread would append to its reports | P1: threads per release, with a rule for reruns |
 | A run stopped by the global budget loses that worker's partial work | The gap says so, and coverage becomes `partial` | Pass the budget into the worker loop so it can answer with what it has |
 | Workers use the primary model without a fallback (`get_chat_model`) | Workers bind their own tools, and fallbacks need binding per model | `get_resilient_model(role, prepare=bind_tools)` per worker |
+| The validator checks totals, the gate, versions and CVE ids; other numbers (coverage %, error rates) aren't checked | They aren't release blockers, and loose patterns reject good documents | Add a claim pattern per fact when a fact is added; the judge scores the rest (O-stories) |
+| A sentence that cites real but unrelated evidence passes the validator | Ids are checked for existence, not relevance | O2: LLM-as-a-judge faithfulness per sentence against the cited items |
+| Ticket titles reach the writer (descriptions and comments don't) | Titles are short and inside `<evidence>` | G1: the sanitizer over the brief |
+| `PostgresDocumentStore` opens a connection per call | Few calls per run | P1: a shared async pool |
 
 ## 6. Glossary
 
