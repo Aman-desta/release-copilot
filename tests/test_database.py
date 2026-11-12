@@ -47,4 +47,4 @@ def test_alembic_upgrade_head(conn):
     cfg = Config(str(Path(__file__).parents[1] / "alembic.ini"))
     cfg.attributes.update(database_url=URL, db_schema=SCHEMA)
     command.upgrade(cfg, "head")
-    assert conn.execute(f'SELECT version_num FROM "{SCHEMA}".alembic_version').fetchone()[0] == "0001"
+    assert conn.execute(f'SELECT version_num FROM "{SCHEMA}".alembic_version').fetchone()[0] == "0002"

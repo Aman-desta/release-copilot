@@ -533,6 +533,9 @@ sentences (the required sections: scope, changes, quality, deployment, risks), c
 (`must_cite_in_risks`: each blocking alert, a failing gate, failing checks, untracked commits), and any one id of an
 entry satisfies it. The claim patterns are deliberately narrow ("contains 8 commits" is a total, "1 untracked
 commit" is not): a validator that rejects good documents trains nobody.
+It also **fails closed on what it can't parse**: anything shaped like a citation that isn't a valid one
+(`[jira: PAY-1]`, `[JIRA:PAY-1]`, `[confluence:RB-12]`) is an unknown citation in every section. Before that
+fix (found in review) such a bracket read as prose, so in summary and rollback it rendered like a checked citation.
 A failed draft goes back once with only its failed sections and their issues (`revision_brief`), and only those
 sections are taken from the answer (`apply_revision`), so a revision can't break a section that passed.
 

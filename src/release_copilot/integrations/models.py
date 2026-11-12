@@ -208,6 +208,7 @@ class Release(_Model):
     draft: bool
     prerelease: bool
     url: str
+    body: str = ""  # the release notes (Markdown)
 
 
 # ----------------------------------------------------------------------------------------------- Azure

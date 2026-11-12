@@ -183,7 +183,10 @@ class GitHubClient:
 
     @staticmethod
     def _release(raw: dict[str, Any]) -> Release:
-        return Release(id=raw["id"], tag_name=raw["tag_name"], name=raw["name"], draft=raw["draft"], prerelease=raw["prerelease"], url=raw["html_url"])
+        return Release(
+            id=raw["id"], tag_name=raw["tag_name"], name=raw["name"], draft=raw["draft"], prerelease=raw["prerelease"],
+            url=raw["html_url"], body=raw.get("body") or "",
+        )
 
     async def list_releases(self) -> list[Release]:
         return [self._release(r) async for r in self._paginate("/releases")]
@@ -205,3 +208,11 @@ class GitHubClient:
                 raise
             return existing
         return self._release(raw)
+
+    async def update_release(self, release_id: int, *, name: str | None = None, body: str | None = None) -> Release:
+        """Change a release's name or notes. Idempotent (the same PATCH twice leaves the same release), so it is retried."""
+        payload = {k: v for k, v in {"name": name, "body": body}.items() if v is not None}
+        response = await self._http.request(
+            "PATCH", REPO + "/releases/{release_id}", path_params={**self._repo, "release_id": release_id}, json=payload, idempotent=True
+        )
+        return self._release(response.json())

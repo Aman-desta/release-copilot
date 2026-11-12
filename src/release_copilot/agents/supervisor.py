@@ -2,7 +2,7 @@
 
     START -> collect -> plan --Send x N--> worker (parallel) -> review --Send--> worker (follow-ups) -> review
                            \\                                       \\
-                            `--(no workers)--> review               `--> finalize -> END
+                            `--(no workers)--> review               `--> finalize -> [document] -> END
 
 - **collect**: the deterministic evidence (A1). Facts come from code, so the record the document cites, and the
   policy reads, doesn't depend on what a model chose to look at.
@@ -13,6 +13,8 @@
 - **review**: after a round, a model may propose follow-ups (judgment); code checks them (``accept_follow_ups``)
   and hands the accepted ones to workers with ``Command(goto=[Send(...)], update=...)``. One follow-up round at most.
 - **finalize**: the ``ReleaseAssessment``: evidence, findings with verified citations, and coverage by the policy.
+- **document** (A4, when a document store is given): the release document subgraph (``documents/graph.py``):
+  write, validate citations, revise once, store, publish the GitHub draft.
 
 Budgets: each worker has its own (A2); the run has a global token and cost budget (``budget.BudgetGuard``), and a
 ``recursion_limit`` per graph. Running out is a gap, never a crash.
@@ -21,7 +23,16 @@ Budgets: each worker has its own (A2); the run has a global token and cost budge
 import operator
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, TypedDict, cast, get_args, get_origin
+from typing import (
+    Annotated,
+    Any,
+    Literal,
+    NotRequired,
+    TypedDict,
+    cast,
+    get_args,
+    get_origin,
+)
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -31,12 +42,16 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, Send
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
+from release_copilot.agents.assessment import (
+    AttributedFinding,
+    ReleaseAssessment,
+    TaskReport,
+)
 from release_copilot.agents.budget import BudgetExceeded, BudgetGuard, RunBudget
 from release_copilot.agents.factory import build_worker
 from release_copilot.agents.findings import (
-    Finding,
     Severity,
     WorkerReport,
     WorkerStatus,
@@ -53,19 +68,21 @@ from release_copilot.agents.followups import (
 )
 from release_copilot.agents.policy import (
     DEFAULT_POLICY,
-    Coverage,
     EvidencePolicy,
     assess_coverage,
     section_value,
 )
 from release_copilot.agents.run import (
-    RunInfo,
     release_thread_id,
     run_config,
     run_context,
     run_info,
 )
 from release_copilot.agents.workers import WORKERS, WorkerSpec
+from release_copilot.documents.facts import DocumentContext
+from release_copilot.documents.graph import DocumentResult, build_document_graph
+from release_copilot.documents.store import DocumentStore
+from release_copilot.documents.template import DocumentDraft
 from release_copilot.evidence.collect import collect_release_evidence
 from release_copilot.evidence.index import EvidenceIndex
 from release_copilot.evidence.model import EvidenceGap, ReleaseEvidence, ReleaseIdentity
@@ -84,55 +101,7 @@ Models = Callable[[str], BaseChatModel]
 
 
 def default_models(name: str) -> BaseChatModel:
-    return get_chat_model("supervisor" if name == "supervisor" else "worker")
-
-
-# ---------------------------------------------------------------------------------------------- results
-
-
-class _Frozen(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-
-class TaskReport(_Frozen):
-    """A worker's report for one task, as the supervisor keeps it: evidence ids instead of raw tool artifacts.
-
-    The artifacts hold every object the tools returned (personal data included) and don't survive a checkpoint
-    round trip as objects, so the supervisor's state keeps only the ids, which is all it needs: the facts are in
-    ``ReleaseEvidence``, and the ids are what citations and follow-ups are checked against.
-    """
-
-    task: WorkerTask
-    report: WorkerReport
-    collected: tuple[str, ...] = ()  # the evidence ids the worker's tools returned
-
-    @classmethod
-    def of(cls, task: WorkerTask, report: WorkerReport) -> "TaskReport":
-        return cls(task=task, report=report.model_copy(update={"artifacts": ()}), collected=report.index().ids)
-
-
-class AttributedFinding(_Frozen):
-    worker: str
-    round: int
-    finding: Finding
-    verified: bool  # every cited id is evidence this run collected; A4 refuses to cite an unverified finding
-
-
-class ReleaseAssessment(_Frozen):
-    """The supervisor's result: what A4 writes the document from, and what A5 decides on."""
-
-    run: RunInfo
-    identity: ReleaseIdentity
-    evidence: ReleaseEvidence
-    coverage: Coverage
-    findings: tuple[AttributedFinding, ...]  # most severe first
-    reports: tuple[TaskReport, ...]  # by round, then in worker order
-    follow_ups: tuple[WorkerTask, ...] = ()
-    rejected_follow_ups: tuple[RejectedFollowUp, ...] = ()
-    gaps: tuple[EvidenceGap, ...] = ()  # the supervisor's own: skipped workers, spent budget, an invalid answer
-
-    def all_gaps(self) -> tuple[EvidenceGap, ...]:
-        return (*self.evidence.gaps, *self.gaps, *(g for r in self.reports for g in r.report.gaps))
+    return get_chat_model(name if name in ("supervisor", "writer") else "worker")
 
 
 # ------------------------------------------------------------------------------------------------ state
@@ -144,6 +113,7 @@ class SupervisorInput(TypedDict):
 
 class SupervisorOutput(TypedDict):
     assessment: ReleaseAssessment
+    document: NotRequired[DocumentResult]  # only when the supervisor was built with a document store (A4)
 
 
 class SupervisorState(TypedDict):
@@ -158,6 +128,7 @@ class SupervisorState(TypedDict):
     follow_ups: Annotated[list[WorkerTask], operator.add]
     rejected: Annotated[list[RejectedFollowUp], operator.add]
     assessment: ReleaseAssessment
+    document: DocumentResult
 
 
 class WorkerJob(TypedDict):
@@ -193,6 +164,7 @@ def build_supervisor(
     specs: Mapping[str, WorkerSpec] = WORKERS,
     policy: EvidencePolicy = DEFAULT_POLICY,
     checkpointer: BaseCheckpointSaver | None = None,
+    documents: DocumentStore | None = None,
 ) -> CompiledStateGraph:
     planner = models("supervisor").with_structured_output(FollowUpPlan, include_raw=True)
 
@@ -293,7 +265,14 @@ def build_supervisor(
     graph.add_edge(START, "collect")
     graph.add_edge("collect", "plan")
     graph.add_edge("worker", "review")  # fan-in: review runs once, after every worker of the step has finished
-    graph.add_edge("finalize", END)
+    if documents is None:
+        graph.add_edge("finalize", END)
+    else:
+        # A compiled subgraph as a node: it reads the "assessment" key and writes "document", both shared with
+        # the supervisor's state, so no wrapper is needed and its nodes show up in the same trace.
+        graph.add_node("document", build_document_graph(models("writer"), documents, box.github))
+        graph.add_edge("finalize", "document")
+        graph.add_edge("document", END)
     return graph.compile(name="supervisor", checkpointer=checkpointer)
 
 
@@ -302,6 +281,7 @@ class SupervisorRun:
     assessment: ReleaseAssessment
     usage: dict[str, Any]  # UsageTracker.summary(): tokens and cost by role and model
     trace_id: str | None = None  # the OTel trace id (32 hex digits), the same in Phoenix and Langfuse; None when tracing is off
+    document: DocumentResult | None = None  # A4: when the supervisor was built with a document store
 
 
 async def run_supervisor(
@@ -332,9 +312,12 @@ async def run_supervisor(
             "release_copilot.coverage": assessment.coverage.status,
             "release_copilot.findings": len(assessment.findings),
         })
+        document: DocumentResult | None = out.get("document")
+        if document is not None:
+            span.set_attribute("release_copilot.document", document.status)
         if usage["total_cost_usd"] is not None:
             span.set_attribute("release_copilot.usage.cost_usd", usage["total_cost_usd"])
-    return SupervisorRun(assessment=assessment, usage=usage, trace_id=trace_id_of(span))
+    return SupervisorRun(assessment=assessment, usage=usage, trace_id=trace_id_of(span), document=document)
 
 
 # ---------------------------------------------------------------------------------------------- helpers
@@ -359,7 +342,8 @@ def checkpoint_serializer() -> JsonPlusSerializer:
     LangGraph's default restores any class a checkpoint names (with a warning), which a future version blocks; an
     allowlist is the safe form. It is built from the state's types, so a new model in the state is covered.
     """
-    roots = (ReleaseIdentity, ReleaseEvidence, TaskReport, EvidenceGap, WorkerTask, RejectedFollowUp, ReleaseAssessment)
+    roots = (ReleaseIdentity, ReleaseEvidence, TaskReport, EvidenceGap, WorkerTask, RejectedFollowUp, ReleaseAssessment,
+             DocumentResult, DocumentContext, DocumentDraft)  # the document subgraph's state is checkpointed too
     return JsonPlusSerializer(allowed_msgpack_modules=sorted((t.__module__, t.__name__) for t in _model_types(roots)))
 
 
