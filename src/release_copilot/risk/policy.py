@@ -7,7 +7,8 @@ a rule naming a signal that doesn't exist is a load error, not a rule that silen
 
 **Unknown is not empty.** A rule's ``on_unknown`` says what happens when its signal couldn't be computed (the
 evidence has a gap). The default is ``trigger``: fail closed, an unknown security scan blocks like a bad one.
-A blocking rule *must* trigger: ``ignore`` is allowed only on rules that add points, a floor or a condition.
+A rule that blocks or sets a minimum tier *must* trigger, because both decide whether a human approves the
+release: ``ignore`` is allowed only on rules that add points or a condition.
 """
 
 import hashlib
@@ -88,10 +89,13 @@ class Rule(_Frozen):
             raise ValueError(f"rule id {self.id!r} must be lower-case words joined by dashes")
         if not (self.block or self.score or self.min_tier or self.condition):
             raise ValueError(f"rule {self.id!r} has no effect (block, score, min_tier or condition)")
-        if self.block and self.on_unknown == "ignore":
-            # A blocker that ignores unknowns turns missing evidence into approval: the release passes because the
-            # scan *timed out*. Unknown must never be safer than bad for a blocker.
-            raise ValueError(f"rule {self.id!r} blocks, so it must fail closed (on_unknown: trigger)")
+        if (self.block or self.min_tier) and self.on_unknown == "ignore":
+            # These decide whether a human sees the release at all. A blocker that ignores unknowns turns missing
+            # evidence into approval (the release passes because the scan *timed out*); a floor that ignores them
+            # can drop a critical service to "low", a standard change with no approver (A7). Points and conditions
+            # may ignore unknowns: their harm is bounded, and the evidence policy still sees the gap.
+            effect = "blocks" if self.block else "sets a minimum tier"
+            raise ValueError(f"rule {self.id!r} {effect}, so it must fail closed (on_unknown: trigger)")
         return self
 
 

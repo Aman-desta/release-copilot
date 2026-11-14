@@ -578,9 +578,11 @@ inputs, and changed by a reviewed diff to a YAML file. Auditors and CABs need ex
 **What.** The schema has no negative points and no maximum tier, so no rule can make a release look safer.
 Signal names are validated at load (a typo is a load error, not a rule that never fires), and the file is read
 with `yaml.safe_load`. Every rule's `on_unknown` defaults to `trigger`: an unknown security scan blocks like a bad
-one. A **blocking** rule must trigger (the schema rejects `ignore` on it): a blocker that ignores
-unknowns lets a release pass *because* its evidence is missing. `ignore` stays allowed on points, floors and
-conditions, which is a deliberate trade-off: for those rules, unknown can score lower than bad. Conditions must be
+one. A rule that **blocks or sets a minimum tier** must trigger (the schema rejects `ignore` on it):
+both decide whether a human approves the release. A blocker that ignores unknowns lets a release pass *because* its
+evidence is missing; a floor that ignores them can drop a critical service to "low", a standard change with no
+approver (A7). `ignore` stays allowed on points and conditions, a deliberate trade-off: their harm is bounded, and
+the evidence policy (A3) still sees the gap. Conditions must be
 non-empty, so "proceed with conditions" always has something to check. Both were found in review. The **monotonicity** this gives is tested with hypothesis: for any signals, making one signal worse (more
 alerts, a failed gate, unknown evidence) never lowers the tier, the score or the decision.
 

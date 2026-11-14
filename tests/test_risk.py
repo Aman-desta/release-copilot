@@ -263,6 +263,8 @@ def test_the_default_policy_loads_and_covers_the_story_rules():
         # blocker that ignores unknowns let a release pass because its evidence was missing.
         ({"rules": [rule("x", "db_migrations", score=1, condition="")]}, "at least 1 character"),
         ({"rules": [rule("x", "quality_gate_failed", block=True, on_unknown="ignore")]}, "must fail closed"),
+        # A floor decides the approver (A7): ignoring an unknown criticality could make a critical service "low".
+        ({"rules": [rule("x", "ci_criticality", op="at_most", value=1, min_tier="moderate", on_unknown="ignore")]}, "sets a minimum tier, so it must fail closed"),
     ],
 )
 def test_an_invalid_policy_fails_to_load(tmp_path, change, message):
