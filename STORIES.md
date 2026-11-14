@@ -16,8 +16,8 @@ Each story's status goes at the end of its `###` heading line: *(none)* = open �
 
 | Status | Stories |
 |---|---|
-| Done | F1, F2, F3, T1, T2, T3, T4, T5, A1, A2, A3, O1, A4 |
-| Next up | A5 |
+| Done | F1, F2, F3, T1, T2, T3, T4, T5, A1, A2, A3, O1, A4, A5 |
+| Next up | P1 |
 
 **Suggested order:** F2, F3, T1, T2, T3, T4, T5 → A1, A2, A3 (first end-to-end run) → O1 (trace everything from here on) →
 A4, A5, P1, A6, A7, A8 → P2, P3 → G1, G2 → O2, O3, O4 → M1, M2 → S1, S2, S3 → X1, X2.
@@ -186,7 +186,7 @@ plus findings; a real-model smoke test (marked `@pytest.mark.live`, skipped by d
 
 **Acceptance:** documents for every scenario pass validation; an injected fake citation is caught; the `critical_cve` document lists the CVE under risks.
 
-### A5 [P0, M] Risk assessment: policy as code plus LLM rationale
+### A5 [P0, M] Risk assessment: policy as code plus LLM rationale ✅ Done
 - `policies/change_policy.yaml`: deterministic rules (critical or high open alert → block; failing quality gate →
   block; untracked commit → block; DB migration → +1 risk; criticality-1 CI → minimum risk moderate; and so on).
 - The rules engine produces `RiskAssessment{tier, score, blockers[], factors[]}` **before** any LLM involvement;

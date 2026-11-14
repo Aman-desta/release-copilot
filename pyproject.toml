@@ -27,14 +27,23 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http>=1.45",
     "openinference-instrumentation-langchain>=0.1.82",
     "openinference-semantic-conventions>=0.1.43",
+    "pyyaml>=6.0",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"release_copilot.policies" = ["*.yaml"]
+
 [dependency-groups]
 # The mocks are a test dependency only: tests run them in-process through httpx.ASGITransport.
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "release-copilot-mocks"]
+dev = [
+    "hypothesis>=6.100",
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "release-copilot-mocks",
+]
 
 [tool.uv.sources]
 release-copilot-mocks = { path = "../release-copilot-mocks", editable = true }

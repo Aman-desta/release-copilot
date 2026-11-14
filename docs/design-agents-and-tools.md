@@ -559,6 +559,45 @@ errors: a release that is already **published** is not touched, and a document t
 **latest valid version** (a slower, older run) is not published. Only valid documents are published at all.
 A GitHub outage leaves the document stored and valid, with a retryable gap.
 
+### D42. Risk is decided by rules over signals, before any model (A5)
+
+**What.** `risk/signals.py` computes a closed set of `RiskSignals` from the assessment and A4's facts. Each signal
+is a value plus the evidence ids it rests on; `None` means unknown and carries the gap ids. The change policy
+(`policies/change_policy.yaml`) is data: rules say *when* a signal matches and *what* follows (block, points, a
+minimum tier, a condition to proceed). `evaluate_policy` turns signals and policy into a `RiskAssessment`:
+- the tier is the highest of the score's tier, the fired rules' minimum tiers and, when blocked, `block_min_tier`;
+- the decision is block, or proceed with conditions, or proceed.
+
+No model has been called yet when the decision exists.
+
+**Why it matters.** The decision can be explained as "rule X fired on evidence Y", reproduced from the same
+inputs, and changed by a reviewed diff to a YAML file. Auditors and CABs need exactly that.
+
+### D43. A policy can only add risk, and fails closed on unknowns
+
+**What.** The schema has no negative points and no maximum tier, so no rule can make a release look safer.
+Signal names are validated at load (a typo is a load error, not a rule that never fires), and the file is read
+with `yaml.safe_load`. Every rule's `on_unknown` defaults to `trigger`: an unknown security scan blocks like a bad
+one. A **blocking** rule must trigger (the schema rejects `ignore` on it): a blocker that ignores
+unknowns lets a release pass *because* its evidence is missing. `ignore` stays allowed on points, floors and
+conditions, which is a deliberate trade-off: for those rules, unknown can score lower than bad. Conditions must be
+non-empty, so "proceed with conditions" always has something to check. Both were found in review. The **monotonicity** this gives is tested with hypothesis: for any signals, making one signal worse (more
+alerts, a failed gate, unknown evidence) never lowers the tier, the score or the decision.
+
+### D44. The model writes the rationale only, and code checks it
+
+**What.** The model gets the engine's result (factors and evidence ids, no ticket text) and returns a
+`RiskRationale`. `with_rationale` copies **only** the rationale fields onto the assessment, so the model can't
+change the tier *by construction*. A hypothesis property test feeds it arbitrary answers and checks that tier,
+score, factors, blockers, conditions and decision never change. The text is checked like a document (A4):
+known, well-formed citations, every blocker cited, and no stated tier other than the computed one ("this is low
+risk" on a moderate release is a tier change made in words; the prompt_injection test does exactly that). A
+rationale that fails, is invalid, or runs out of budget is replaced by a code rationale built from the factors.
+The model's own tier opinion (`model_tier`) is recorded for reviewers and evals, never used.
+
+**Why it matters.** "The LLM cannot lower the tier" is enforced by data flow, not by the prompt: the only path from
+the model's answer to the assessment is a function that doesn't touch the tier.
+
 ---
 
 ## 5. Known limitations and follow-ups
@@ -587,6 +626,9 @@ A GitHub outage leaves the document stored and valid, with a retryable gap.
 | A sentence that cites real but unrelated evidence passes the validator | Ids are checked for existence, not relevance | O2: LLM-as-a-judge faithfulness per sentence against the cited items |
 | Ticket titles reach the writer (descriptions and comments don't) | Titles are short and inside `<evidence>` | G1: the sanitizer over the brief |
 | `PostgresDocumentStore` opens a connection per call | Few calls per run | P1: a shared async pool |
+| The model's tier opinion is only recorded; a model that thinks the risk is higher can't raise it | The story keeps the tier fully deterministic | O-stories: track model_tier disagreement in evals; a "model escalates" rule that adds a condition, if wanted |
+| The release document doesn't show the risk assessment yet | A4 ran before A5 existed | A6 (the change request carries the tier and rationale); add a risk section to the document then |
+| Severity of a medium alert, coverage trends and error rates don't affect the score | Not in the story's rule list | Add signals and rules; the property tests cover new rules as long as they only add risk |
 
 ## 6. Glossary
 

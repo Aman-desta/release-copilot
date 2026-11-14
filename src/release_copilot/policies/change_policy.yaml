@@ -1,0 +1,73 @@
+# The change policy (story A5): which facts block a release, raise its risk, or add conditions.
+#
+# Rules are evaluated in code (risk/engine.py) BEFORE any model sees the release. A model only writes the rationale
+# afterwards and cannot change the tier, the score, the blockers or the decision.
+#
+# A rule:  when <signal> matches  ->  block | score (points) | min_tier | condition
+#   signals: risk/signals.py (a closed set; an unknown name fails to load)
+#   ops:     present (non-empty / true, the default), equals, at_most, at_least, in
+#   on_unknown: trigger (default, fail closed) | ignore   -- what to do when the signal's evidence has a gap
+#
+# Tier = the highest of: the tier for the total score, every fired rule's min_tier, and block_min_tier if blocked.
+# Decision = block if any rule blocks; else proceed_with_conditions if any condition; else proceed.
+
+version: "2026-11-12"
+block_min_tier: high
+score_tiers:        # the lowest score for each tier; below "moderate" is "low"
+  moderate: 2
+  high: 5
+  very_high: 8
+
+rules:
+  # --- blockers: the release can't go out until these are fixed --------------------------------------------
+  - id: blocking-security-alert
+    reason: An open critical or high security alert (Dependabot or code scanning)
+    when: {signal: open_blocking_alerts}
+    block: true
+
+  - id: quality-gate-failed
+    reason: The SonarQube quality gate fails on the release branch
+    when: {signal: quality_gate_failed}
+    block: true
+
+  - id: failing-checks
+    reason: A required CI check failed on the release head
+    when: {signal: failing_checks}
+    block: true
+
+  - id: untracked-commit
+    reason: A commit reached the release branch without a pull request (no review, no ticket)
+    when: {signal: untracked_commits}
+    block: true
+
+  - id: insufficient-evidence
+    reason: Required evidence is missing, so the release can't be shown to be safe
+    when: {signal: evidence_coverage, op: equals, value: insufficient}
+    block: true
+
+  # --- risk factors ---------------------------------------------------------------------------------------
+  - id: db-migration
+    reason: The release changes the database schema
+    when: {signal: db_migrations}
+    score: 1
+
+  - id: severe-finding
+    reason: A reviewer found a high or critical issue in the evidence
+    when: {signal: severe_findings}
+    score: 2
+
+  - id: critical-service
+    reason: The service is business criticality 1 in the CMDB
+    when: {signal: ci_criticality, op: at_most, value: 1}
+    min_tier: moderate
+
+  # --- conditions: the release may proceed once these hold -----------------------------------------------
+  - id: partial-evidence
+    reason: Optional evidence is missing or a reviewer didn't finish
+    when: {signal: evidence_coverage, op: equals, value: partial}
+    condition: An approver reviews the missing evidence listed in the release document
+
+  - id: open-tickets
+    reason: Tickets in scope are not Done
+    when: {signal: open_tickets}
+    condition: Every ticket in scope is Done, or moved out of the release, before the swap

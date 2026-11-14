@@ -19,6 +19,7 @@ from release_copilot.config import get_settings
 from release_copilot.documents.store import PostgresDocumentStore
 from release_copilot.evidence.model import ReleaseIdentity
 from release_copilot.observability.tracing import configure_tracing
+from release_copilot.risk.policy import load_policy
 from release_copilot.tools.toolbox import Toolbox
 
 
@@ -43,7 +44,7 @@ async def main() -> None:
     try:
         async with Toolbox.from_settings(settings) as box:
             store = PostgresDocumentStore(settings.database_conninfo(), settings.db_schema) if args.document else None
-            result = await run_supervisor(build_supervisor(box, documents=store), identity, run_id=run_id, scenario=args.scenario)
+            result = await run_supervisor(build_supervisor(box, documents=store, change_policy=load_policy()), identity, run_id=run_id, scenario=args.scenario)
     finally:
         if tracing is not None:
             tracing.shutdown()  # flushes the last spans before the process exits
@@ -52,6 +53,10 @@ async def main() -> None:
     print(f"run {run_id}: coverage {a.coverage.status}, {len(a.findings)} findings, {len(a.all_gaps())} gaps")
     for f in a.findings:
         print(f"  [{f.finding.severity}] {f.worker}: {f.finding.title}{'' if f.verified else '  (unverified)'}")
+    if (risk := result.risk) is not None:
+        print(f"risk: {risk.decision}, tier {risk.tier} (score {risk.score}); rationale by {risk.rationale_source}")
+        for b in risk.blockers:
+            print(f"  blocker {b.rule_id}: {', '.join(b.evidence_ids)}")
     if (doc := result.document) is not None:
         version = f" v{doc.record.version}" if doc.record else ""
         print(f"document: {doc.status}{version} after {doc.writer_calls} writer call(s)" + (f", draft {doc.release.url}" if doc.release else ""))

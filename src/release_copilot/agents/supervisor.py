@@ -89,6 +89,9 @@ from release_copilot.evidence.model import EvidenceGap, ReleaseEvidence, Release
 from release_copilot.llm.factory import get_chat_model
 from release_copilot.llm.usage import UsageTracker
 from release_copilot.observability.tracing import run_span, trace_id_of
+from release_copilot.risk.model import RiskAssessment
+from release_copilot.risk.policy import ChangePolicy
+from release_copilot.risk.rationale import assess_risk
 from release_copilot.tools.toolbox import Toolbox
 
 MAX_ROUNDS = 2  # the workers' own round, then at most one follow-up round
@@ -101,6 +104,9 @@ Models = Callable[[str], BaseChatModel]
 
 
 def default_models(name: str) -> BaseChatModel:
+    """"supervisor" and "writer" are roles; "risk" (the rationale) is written by the writer role; the rest are workers."""
+    if name == "risk":
+        return get_chat_model("writer")
     return get_chat_model(name if name in ("supervisor", "writer") else "worker")
 
 
@@ -114,6 +120,7 @@ class SupervisorInput(TypedDict):
 class SupervisorOutput(TypedDict):
     assessment: ReleaseAssessment
     document: NotRequired[DocumentResult]  # only when the supervisor was built with a document store (A4)
+    risk: NotRequired[RiskAssessment]  # only when the supervisor was built with a change policy (A5)
 
 
 class SupervisorState(TypedDict):
@@ -129,6 +136,7 @@ class SupervisorState(TypedDict):
     rejected: Annotated[list[RejectedFollowUp], operator.add]
     assessment: ReleaseAssessment
     document: DocumentResult
+    risk: RiskAssessment
 
 
 class WorkerJob(TypedDict):
@@ -165,6 +173,7 @@ def build_supervisor(
     policy: EvidencePolicy = DEFAULT_POLICY,
     checkpointer: BaseCheckpointSaver | None = None,
     documents: DocumentStore | None = None,
+    change_policy: ChangePolicy | None = None,
 ) -> CompiledStateGraph:
     planner = models("supervisor").with_structured_output(FollowUpPlan, include_raw=True)
 
@@ -265,14 +274,24 @@ def build_supervisor(
     graph.add_edge(START, "collect")
     graph.add_edge("collect", "plan")
     graph.add_edge("worker", "review")  # fan-in: review runs once, after every worker of the step has finished
-    if documents is None:
-        graph.add_edge("finalize", END)
-    else:
+    # The steps after the assessment, each optional, in order: risk (A5), then the document (A4).
+    tail = ["finalize"]
+    if change_policy is not None:
+        rationale_model = models("risk")
+
+        async def risk(state: SupervisorState, config: RunnableConfig) -> dict:
+            # The rules decide before the model is called; the model only writes the rationale (risk/rationale.py).
+            return {"risk": await assess_risk(state["assessment"], rationale_model, change_policy, config)}
+
+        graph.add_node("risk", risk)
+        tail.append("risk")
+    if documents is not None:
         # A compiled subgraph as a node: it reads the "assessment" key and writes "document", both shared with
         # the supervisor's state, so no wrapper is needed and its nodes show up in the same trace.
         graph.add_node("document", build_document_graph(models("writer"), documents, box.github))
-        graph.add_edge("finalize", "document")
-        graph.add_edge("document", END)
+        tail.append("document")
+    for a, b in zip(tail, [*tail[1:], END], strict=True):
+        graph.add_edge(a, b)
     return graph.compile(name="supervisor", checkpointer=checkpointer)
 
 
@@ -282,6 +301,7 @@ class SupervisorRun:
     usage: dict[str, Any]  # UsageTracker.summary(): tokens and cost by role and model
     trace_id: str | None = None  # the OTel trace id (32 hex digits), the same in Phoenix and Langfuse; None when tracing is off
     document: DocumentResult | None = None  # A4: when the supervisor was built with a document store
+    risk: RiskAssessment | None = None  # A5: when the supervisor was built with a change policy
 
 
 async def run_supervisor(
@@ -315,9 +335,12 @@ async def run_supervisor(
         document: DocumentResult | None = out.get("document")
         if document is not None:
             span.set_attribute("release_copilot.document", document.status)
+        risk: RiskAssessment | None = out.get("risk")
+        if risk is not None:
+            span.set_attributes({"release_copilot.risk.tier": risk.tier, "release_copilot.risk.decision": risk.decision})
         if usage["total_cost_usd"] is not None:
             span.set_attribute("release_copilot.usage.cost_usd", usage["total_cost_usd"])
-    return SupervisorRun(assessment=assessment, usage=usage, trace_id=trace_id_of(span), document=document)
+    return SupervisorRun(assessment=assessment, usage=usage, trace_id=trace_id_of(span), document=document, risk=risk)
 
 
 # ---------------------------------------------------------------------------------------------- helpers
@@ -343,7 +366,7 @@ def checkpoint_serializer() -> JsonPlusSerializer:
     allowlist is the safe form. It is built from the state's types, so a new model in the state is covered.
     """
     roots = (ReleaseIdentity, ReleaseEvidence, TaskReport, EvidenceGap, WorkerTask, RejectedFollowUp, ReleaseAssessment,
-             DocumentResult, DocumentContext, DocumentDraft)  # the document subgraph's state is checkpointed too
+             DocumentResult, DocumentContext, DocumentDraft, RiskAssessment)  # the document subgraph's state is checkpointed too
     return JsonPlusSerializer(allowed_msgpack_modules=sorted((t.__module__, t.__name__) for t in _model_types(roots)))
 
 

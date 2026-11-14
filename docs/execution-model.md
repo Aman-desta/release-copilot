@@ -113,8 +113,10 @@ flowchart TD
     review -- "yes: ask the supervisor model,<br/>code accepts at most 2" --> fu{"any accepted?"}
     fu -- "yes: Send × k, round = 2" --> worker
     fu -- "no / invalid / budget spent" --> finalize["<b>finalize</b> (code)<br/>verify citations, sort by severity,<br/>assess coverage"]
+    finalize -- "built with a change policy" --> risk["<b>risk</b> (A5)<br/>signals, rules decide tier and decision,<br/>then the model writes the rationale"]
+    risk --> document
     finalize -- "built with a document store" --> document["<b>document</b> subgraph (A4)<br/>write, validate, revise once,<br/>store, publish the draft"]
-    finalize -- "no document store" --> E((END))
+    finalize -- "neither" --> E((END))
     document --> E
 ```
 
@@ -127,6 +129,7 @@ flowchart TD
 | `worker` | yes (inside) | **only its `WorkerJob`** | `reports` (+1 `TaskReport`) |
 | `review` | only when needed | latest round's reports | `follow_ups`, `rejected`, `gaps`, `round`; then `Send`s or `finalize` |
 | `finalize` | no | everything | `assessment` |
+| `risk` (A5) | after the decision, for the rationale | `assessment` | `risk` (`RiskAssessment`); see §11a |
 | `document` (A4) | yes (inside) | `assessment` | `document` (`DocumentResult`); see §11 |
 
 ### Supervisor state and reducers
@@ -443,12 +446,30 @@ The writer sees only the brief built in code. What it can change is prose: the f
 section order are rendered by `template.render`. A citation is `[jira:PAY-102]`, `[fact:commit_count]` or
 `[gap:deploy.metrics]`; anything else is an unknown citation.
 
-## 11a. What comes after the document *(planned)*
+## 11a. The risk step (A5)
+
+**Code:** `risk/signals.py`, `policies/change_policy.yaml`, `risk/policy.py`, `risk/engine.py`, `risk/rationale.py`.
+**Why:** design doc D42–D44.
 
 ```mermaid
 flowchart LR
-    RA["ReleaseAssessment"] --> A5["A5 risk<br/>code sets the floor, model explains<br/>insufficient coverage → no auto-approve"]
-    A5 --> A6["A6 change request<br/>idempotent (correlation_id)"]
+    A["assessment"] --> S["risk_signals (code)<br/>value + evidence ids<br/>None = unknown, with gap ids"]
+    P["change_policy.yaml<br/>validated at load"] --> R
+    S --> R["evaluate_policy (code)<br/>tier, score, blockers,<br/>conditions, decision"]
+    R --> M["model writes a rationale<br/>(no ticket text in the brief)"]
+    M --> C{"rationale checks<br/>citations, blockers cited,<br/>no other tier stated"}
+    C -- "pass" --> OUT["RiskAssessment<br/>rationale by model"]
+    C -- "fail, invalid, budget" --> OUT2["RiskAssessment<br/>code rationale + gap"]
+```
+
+The decision is complete before the model is called, and the only thing copied from the model's answer is the
+rationale text and its tier *opinion* (`model_tier`, recorded, never used).
+
+### What comes after the risk *(planned)*
+
+```mermaid
+flowchart LR
+    A5["A5 risk<br/>tier and decision"] --> A6["A6 change request<br/>idempotent (correlation_id)"]
     A6 --> A7["A7 approval by risk tier<br/>interrupt() + Postgres checkpointer<br/>resume on webhook"]
     A7 --> A8["A8 slot swap, health watch,<br/>rollback"]
 ```
@@ -503,5 +524,5 @@ flowchart LR
 5. The `reports` reducer merges them, and `review` runs once.
 6. Only when a finding is severe does a model propose follow-ups; **code** accepts at most two, about collected evidence.
 7. `finalize` verifies citations, sorts findings, and applies the **policy** to the gaps to get the coverage.
-8. With a document store, the **document** step writes, validates every citation, revises once, stores and publishes the draft.
+8. With a change policy, the **risk** step decides tier and decision by rules, then a model explains it (checked). With a document store, the **document** step writes, validates every citation, revises once, stores and publishes the draft.
 9. Everything that went wrong is a gap with a reason; only bugs raise.
